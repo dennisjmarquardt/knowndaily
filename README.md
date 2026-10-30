@@ -2,7 +2,7 @@
 
 **Version 0.1 · A personal development PWA**
 
-Daily checklist, customizable habit goals, autosaving writing space, sequential Bible reading, a compressed daily photo, and a history view. Works on phones, tablets, and desktop browsers. No build step, subscription, or paid services are required for initial personal use.
+Daily checklist, customizable habit goals,  autosaving writing space, sequential Bible reading, a compressed daily photo, and a history view. Works on phones, tablets, and desktop browsers. No build step, subscription, or paid services are required for initial personal use.
 
 ## Quickest way to TRY it today (no database required)
 
