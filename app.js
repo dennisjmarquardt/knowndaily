@@ -18,6 +18,7 @@
   const escapeHTML = str => String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   const countWords = s => (s.trim().match(/\S+/gu) || []).length;
   const goalText = h => h.kind==='writing' ? `${h.goal} words` : h.kind==='reading' ? `${h.goal} chapters` : h.kind==='activity' ? `${h.goal} minutes` : (h.kind==='time'||h.kind==='bed') ? `Goal ${formatTime(h.targetTime)}` : 'Daily practice';
+  const goalText = h => h.kind==='writing' ? `${h.goal} words` : h.kind==='reading' ? (readingPlan()==='year'?'3–4 chapters · yearly plan':`${readingChapterGoal()} chapters · ${PLAN_NAMES[readingPlan()]}`) : h.kind==='activity' ? `${h.goal} minutes` : (h.kind==='time'||h.kind==='bed') ? `Goal ${formatTime(h.targetTime)}` : 'Daily practice';
   const formatTime = t => {if(!t)return '';const [h,m]=t.split(':').map(Number);return new Date(2000,1,1,h,m).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});};
   const defaultHabits = () => [
     {id:uid(), title:'Wake up',kind:'time',goal:1,targetTime:'06:30',position:0},
@@ -99,6 +100,8 @@
     root.innerHTML=`<div class="app-shell">${header()}${view==='today'?renderToday():view==='writing'?renderWriting():view==='reading'?renderReading():view==='activity'?renderActivity():view==='history'?renderHistory():renderSettings()}<footer class="footer">SMALL DAILY PRACTICES. A LIFE OF FORMATION. · KNOWN FORMATION LABS</footer></div>`;
     if(view==='today'||view==='history')loadPhotoPreviews();
     if(view==='reading')queueMicrotask(()=>{if(versionsStatus==='idle')loadVersions();else if(versionsStatus==='ready'&&bibleRequested!==requestKey()&&versions.length)loadChapter();});
+    if(view==='reading'&&activeDay===todayString()&&currentReadingIndex()!=null)queueMicrotask(()=>{if(versionsStatus==='idle')loadVersions();else if(versionsStatus==='ready'&&bibleRequested!==requestKey()&&versions.length)loadChapter();});
+    if(view==='settings')updateReadingPreview();
     if(view==='writing'){const editor=document.querySelector('#writing-editor');if(editor)editor.value=state.writing[activeDay]||'';}
   }
   function renderToday(){
@@ -112,6 +115,7 @@
       <div class="card quote"><small>A guiding idea</small><p>“Pay attention to the life you are forming.”</p><small>Known Formation Labs</small></div>
     </aside><main><div class="section-header"><h2 class="section-title">${escapeHTML(dailyHabitsHeading())}</h2><button class="text-button" data-view="settings">+ Customize</button></div><div class="habit-list">
       ${state.habits.map(h=>{const done=isDone(h);let extra='';if(h.kind==='reading')extra=`${(state.readings[activeDay]||[]).length} / ${h.goal} chapters`;if(h.kind==='writing')extra=`${countWords(state.writing[activeDay]||'')} / ${h.goal} words`;
+      ${state.habits.map(h=>{const done=isDone(h);let extra='';if(h.kind==='reading')extra=`${(state.readings[activeDay]||[]).length} chapters read${activeDay===todayString()?` · ${readingTarget()} assigned`:''}`;if(h.kind==='writing')extra=`${countWords(state.writing[activeDay]||'')} / ${h.goal} words`;
        return `<div class="card habit ${done?'completed':''}"><button class="habit-main" data-action="open-habit" data-id="${h.id}" aria-label="Open ${escapeHTML(h.title)}"><span class="habit-icon">${icons[h.kind]||'✓'}</span><span><span class="habit-title" style="display:block">${escapeHTML(h.title)}</span><span class="habit-detail">${extra||goalText(h)}</span></span><span class="habit-chevron">›</span></button><div class="check-wrap"><button class="check ${done?'done':''}" data-action="toggle-habit" data-id="${h.id}" aria-label="${done?'Completed':'Complete'} ${escapeHTML(h.title)}">✓</button></div></div>`;}).join('')}
       ${state.habits.length===0?'<div class="empty">Make this your own. Add a daily practice in Customize.</div>':''}</div>
       <button class="photo-slot" data-action="open-photo"><span class="photo-preview" data-photo-day="${activeDay}">${state.photos[activeDay]?'📷':'＋'}</span><span class="photo-copy"><strong>${state.photos[activeDay]?'Your moment, captured':'A picture of today'}</strong><small>${state.photos[activeDay]?'Tap to replace today’s photo':'Add one photo to remember this day'}</small></span><span style="margin-left:auto;color:#68927c">↗</span></button>
@@ -121,8 +125,78 @@
   function renderWriting(){const h=state.habits.find(h=>h.kind==='writing'),goal=h?.goal||500, content=state.writing[activeDay]||'',count=countWords(content);
     return `<main class="view-stack"><button class="back" data-view="today">← Back to today</button>${title('A space to write.')}<p class="subtle">${longDate(activeDay)} · Words collected, one day at a time.</p><section class="panel activity-panel"><div class="flex-between"><div><div class="eyebrow">Daily writing</div><h2 class="section-title">${goal} words</h2></div><span class="badge-small" id="sync-message">Saved draft</span></div><div class="progress-track" style="background:#e2eae0;margin:18px 0 20px"><div id="writing-progress" class="progress-fill" style="width:${Math.min(100,100*count/goal)}%;background:#61947a"></div></div><textarea id="writing-editor" class="editor" placeholder="Start with a thought, a prayer, an observation, or a few words about today…"></textarea><div class="editor-toolbar"><div><strong id="word-count">${count}</strong> <span class="small-label">/ ${goal} words</span></div><button id="writing-complete" class="primary" data-action="finish-writing" ${count<goal?'disabled':''}>${h&&isDone(h)?'✓ Completed':'Complete writing'}</button></div><p class="hint">Drafts save automatically. Completing becomes available when you reach your word goal.</p></section></main>`;
   }
+  // Reading plans use separate bookmarks; switching plans never resets another plan.
+  const READING_SECTIONS = {
+    gospel:[39,40,41,42], law:[0,1,2,3,4], psalms:[18],
+    letters:Array.from({length:21},(_,i)=>44+i), proverbs:[19],
+    history:[...Array.from({length:12},(_,i)=>5+i),43],
+    prophets:[...Array.from({length:17},(_,i)=>22+i),65], wisdom:[17,20,21]
+  };
+  const OTHER_SECTIONS=['law','psalms','letters','proverbs','history','prophets','wisdom'];
+  const SECTION_NAMES={gospel:'Gospels',law:'Law',psalms:'Psalms',letters:'Epistles',proverbs:'Proverbs',history:'History & Acts',prophets:'Prophets & Revelation',wisdom:'Wisdom'};
+  const SECTION_CHAPTERS=Object.fromEntries(Object.entries(READING_SECTIONS).map(([key,books])=>[key,books.flatMap(b=>{
+    const start=BOOKS.slice(0,b).reduce((n,x)=>n+x[1],0);
+    return Array.from({length:BOOKS[b][1]},(_,i)=>start+i);
+  })]));
+  const PLAN_NAMES={gospel:'Gospel-centered',year:'Whole Bible in a year',sequential:'Straight through'};
+  const readingPlan = () => PLAN_NAMES[state.settings?.readingPlan]?state.settings.readingPlan:'gospel';
+  const readingChapterGoal = () => Math.max(1,Math.min(100,Number(state.settings?.readingDailyChapters)||state.habits.find(h=>h.kind==='reading')?.goal||3));
+  function planAssignment(plan,progress={},goal=3,legacyIndex=0){
+    if(plan==='year'){
+      const day=progress.day||0,index=progress.index||0;
+      if(day>=365)return {indices:[],label:'365 readings complete',finished:true};
+      const end=Math.floor((day+1)*CHAPTERS.length/365);
+      return {indices:Array.from({length:Math.max(0,end-index)},(_,i)=>index+i),label:`Reading ${day+1} of 365`};
+    }
+    if(plan==='sequential')return {indices:Array.from({length:goal},(_,i)=>(legacyIndex+i)%CHAPTERS.length),label:'Genesis → Revelation'};
+    const turn=progress.turn||0,section=turn%2===0?'gospel':OTHER_SECTIONS[Math.floor(turn/2)%OTHER_SECTIONS.length];
+    const list=SECTION_CHAPTERS[section],cursor=progress.cursors?.[section]||0;
+    const count=(progress.blockGoal||goal)-(progress.offset||0);
+    return {indices:Array.from({length:count},(_,i)=>list[(cursor+i)%list.length]),label:SECTION_NAMES[section]};
+  }
+  function advancePlan(plan,progress={},goal=3){
+    if(plan==='year'){
+      const day=progress.day||0,index=(progress.index||0)+1;
+      return {day:index>=Math.floor((day+1)*CHAPTERS.length/365)?day+1:day,index};
+    }
+    if(plan==='sequential')return progress;
+    const turn=progress.turn||0,section=turn%2===0?'gospel':OTHER_SECTIONS[Math.floor(turn/2)%OTHER_SECTIONS.length];
+    const blockGoal=progress.blockGoal||goal,offset=(progress.offset||0)+1;
+    return {turn:turn+(offset>=blockGoal?1:0),offset:offset>=blockGoal?0:offset,blockGoal:offset>=blockGoal?null:blockGoal,
+      cursors:{...progress.cursors,[section]:((progress.cursors?.[section]||0)+1)%SECTION_CHAPTERS[section].length}};
+  }
+  function currentAssignment(){
+    const plan=readingPlan(),saved=state.settings?.readingAssignments?.[plan];
+    if(saved?.day===activeDay)return saved;
+    return {...planAssignment(plan,state.settings?.readingProgress?.[plan],readingChapterGoal(),state.readingIndex),day:activeDay,done:0};
+  }
+  function readingTarget(){const a=currentAssignment();return a.indices.length||readingChapterGoal();}
+  function currentReadingIndex(){const a=currentAssignment();return a.indices[a.done]??null;}
+  async function finishReadingChapter(){
+    if(busy||activeDay!==todayString())return;
+    const plan=readingPlan(),assignment=currentAssignment(),index=assignment.indices[assignment.done];
+    if(index==null)return;
+    busy=true;render();
+    const oldState=state,ref=CHAPTERS[index],done=assignment.done+1;
+    const settings={...state.settings,
+      readingAssignments:{...state.settings.readingAssignments,[plan]:{...assignment,done}},
+      readingProgress:{...state.settings.readingProgress,[plan]:advancePlan(plan,state.settings.readingProgress?.[plan],readingChapterGoal())}};
+    const next={...state,settings,readings:{...state.readings,[activeDay]:[...(state.readings[activeDay]||[]),ref]},readingIndex:plan==='sequential'?state.readingIndex+1:state.readingIndex};
+    try{
+      if(cloud()){
+        await required(client.from('daily_readings').upsert({user_id:user.id,day:activeDay,chapters:next.readings[activeDay],updated_at:new Date().toISOString()},{onConflict:'user_id,day'}));
+        await required(client.from('daily_profiles').update({reading_index:next.readingIndex,settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));
+      }else localStorage.setItem(STORAGE_KEY,JSON.stringify(next));
+      state=next;bibleRequested='';bibleContent=null;
+      if(done===assignment.indices.length){
+        for(const habit of state.habits.filter(h=>h.kind==='reading'&&!isDone(h)))await markComplete(habit,true,{chapters:next.readings[activeDay].length,plan});
+      }
+      toast(done===assignment.indices.length?'Reading complete for today!':`${ref} recorded`);
+    }catch(err){state=oldState;noteError(err);}finally{busy=false;render();}
+  }
   const chosenBible = () => versions.find(v=>v.id===state.settings?.bibleVersionId) || versions.find(v=>/^(NLT|NIV)$/i.test(v.abbreviation)) || versions[0];
   function nextChapterId(){const index=state.readingIndex%CHAPTERS.length,book=bookForIndex(index);const before=BOOKS.slice(0,book).reduce((n,x)=>n+x[1],0);return `${BOOK_IDS[book]}.${index-before+1}`;}
+  function nextChapterId(){const index=currentReadingIndex();if(index==null)return '';const book=bookForIndex(index);const before=BOOKS.slice(0,book).reduce((n,x)=>n+x[1],0);return `${BOOK_IDS[book]}.${index-before+1}`;}
   function requestKey(){return `${chosenBible()?.id||''}:${nextChapterId()}`;}
   async function bibleFetch(query){
     if(!cloud())throw new Error('Sign in under Customize → Account & syncing to read Scripture inside KNOWN Daily.');
@@ -142,6 +216,7 @@
   }
   async function loadChapter(){
     if(view!=='reading'||!cloud())return;
+    if(view!=='reading'||!cloud()||activeDay!==todayString()||currentReadingIndex()==null)return;
     if(versionsStatus!=='ready'){if(versionsStatus==='idle')loadVersions();return;}
     const selected=chosenBible();if(!selected)return;
     const key=requestKey();if(bibleRequested===key)return;
@@ -165,9 +240,18 @@
     const h=state.habits.find(h=>h.kind==='reading'),goal=h?.goal||3,read=state.readings[activeDay]||[];
     const current=CHAPTERS[state.readingIndex%CHAPTERS.length], selected=chosenBible();
     const external=`https://www.biblegateway.com/passage/?search=${encodeURIComponent(current)}&version=WEB`;
+    if(activeDay!==todayString())return `<main class="view-stack"><button class="back" data-view="today">← Back to dashboard</button>${title('Your reading record.')}<p class="subtle">${longDate(activeDay)}</p><section class="panel"><h2 class="section-title">Chapters completed</h2><p class="muted-list">${(state.readings[activeDay]||[]).map(escapeHTML).join(' · ')||'No chapters recorded on this date.'}</p><p class="hint">Return to the current date on the dashboard to continue your reading plan.</p></section></main>`;
+    const assignment=currentAssignment(),goal=assignment.indices.length,read=state.readings[activeDay]||[],index=currentReadingIndex();
+    const current=index==null?null:CHAPTERS[index],selected=chosenBible(),complete=assignment.done>=goal;
+    const external=current?`https://www.biblegateway.com/passage/?search=${encodeURIComponent(current)}&version=WEB`:'';
     const choices=versions.length?`<label class="form-label" style="max-width:360px">Bible translation <select id="bible-version" class="field">${versions.map(v=>`<option value="${escapeHTML(v.id)}" ${selected?.id===v.id?'selected':''}>${escapeHTML(v.abbreviation)} — ${escapeHTML(v.name)}</option>`).join('')}</select></label>`:'';
     const scripture=!cloud()?'<p class="subtle">To display licensed Scripture here, first sign in under Customize → Account & syncing. Your reading progress can still be tracked in demo mode.</p>':versionsStatus==='loading'?'<p class="subtle">Checking your available Bible translations…</p>':versionsStatus==='idle'?'<p class="subtle">Connecting to your Bible library…</p>':bibleContent&&bibleRequested===requestKey()?`<div class="scripture-body" aria-label="Bible chapter text">${escapeHTML(bibleContent.content)}</div><p class="scripture-copyright">${escapeHTML(bibleContent.copyright.replace(/<[^>]*>/g,''))}</p>`:bibleError?`<p class="error">${escapeHTML(bibleError)}</p><button class="secondary" data-action="retry-scripture">Try again</button>`:'<p class="subtle">Loading your chapter…</p>';
     return `<main class="view-stack"><button class="back" data-view="today">← Back to today</button>${title('Make room for the Word.')}<p class="subtle">Read each chapter right here, and pick up tomorrow where you stop.</p><section class="panel activity-panel"><div class="eyebrow">${longDate(activeDay)}</div><div class="stat-row"><div class="stat"><div class="stat-number">${read.length}</div><div class="stat-caption">read today</div></div><div class="stat"><div class="stat-number">${goal}</div><div class="stat-caption">daily goal</div></div><div class="stat"><div class="stat-number">${state.readingIndex}</div><div class="stat-caption">chapters overall</div></div></div>${choices}<div class="scripture-card"><div class="step">Your next chapter</div><h2 class="reading-ref">${escapeHTML(current)}</h2>${scripture}<p class="note" style="margin-top:16px">If the reader is unavailable: <a href="${external}" target="_blank" rel="noopener noreferrer">open ${escapeHTML(current)} in Bible Gateway (WEB) ↗</a></p></div><button class="primary" data-action="read-chapter" style="width:100%">✓ I finished ${escapeHTML(current)}</button><p class="hint">After ${goal} chapters, your reading habit checks itself off. Your next chapter is remembered across days.</p>${read.length?`<div class="eyebrow" style="margin-top:22px">Chapters completed today</div><p class="muted-list">${read.map(escapeHTML).join(' · ')}</p>`:''}</section></main>`;
+    const scripture=!cloud()?'<p class="subtle">To display licensed Scripture here, first sign in under Customize → Account & syncing. You can still read with the link below and record your progress.</p>':versionsStatus==='loading'?'<p class="subtle">Checking your available Bible translations…</p>':versionsStatus==='idle'?'<p class="subtle">Connecting to your Bible library…</p>':bibleContent&&bibleRequested===requestKey()?`<div class="scripture-body" aria-label="Bible chapter text">${escapeHTML(bibleContent.content)}</div><p class="scripture-copyright">${escapeHTML(bibleContent.copyright.replace(/<[^>]*>/g,''))}</p>`:bibleError?`<p class="error">${escapeHTML(bibleError)}</p><button class="secondary" data-action="retry-scripture">Try again</button>`:'<p class="subtle">Loading your chapter…</p>';
+    return `<main class="view-stack"><button class="back" data-view="today">← Back to today</button>${title('Make room for the Word.')}<p class="subtle">${PLAN_NAMES[readingPlan()]} · ${escapeHTML(assignment.label)}</p><section class="panel activity-panel"><div class="eyebrow">${longDate(activeDay)}</div><p class="subtle">${readingPlan()==='year'?'365 readings from Genesis to Revelation, with 3 or 4 chapters per reading. Missed or unfinished readings wait for you.':'Your bookmarks move when you finish chapters. Missed days never skip ahead.'}</p><div class="stat-row"><div class="stat"><div class="stat-number">${assignment.done}</div><div class="stat-caption">of ${goal} assigned chapters</div></div><div class="stat"><div class="stat-number">${Object.values(state.readings).reduce((n,v)=>n+v.length,0)}</div><div class="stat-caption">chapters recorded overall</div></div></div>
+    ${goal?`<div class="eyebrow">This reading</div><p class="muted-list">${assignment.indices.map((i,n)=>`${n<assignment.done?'✓ ':''}${escapeHTML(CHAPTERS[i])}`).join(' · ')}</p>`:''}
+    ${complete?`<div class="scripture-card"><h2 class="section-title">${assignment.finished?'You completed the whole Bible!':'Your reading is complete.'}</h2><p class="subtle">${assignment.finished?'All 1,189 chapters across 365 readings.':"Your next reading will be ready tomorrow. Take a moment to reflect on what stood out."}</p></div>`:`${choices}<div class="scripture-card"><div class="step">Your next chapter</div><h2 class="reading-ref">${escapeHTML(current)}</h2>${scripture}<p class="note" style="margin-top:16px">If the reader is unavailable: <a href="${external}" target="_blank" rel="noopener noreferrer">open ${escapeHTML(current)} in Bible Gateway (WEB) ↗</a></p></div><button class="primary" data-action="read-chapter" style="width:100%" ${busy||activeDay!==todayString()?'disabled':''}>${busy?'Saving…':`✓ I finished ${escapeHTML(current)}`}</button>`}
+    <p class="hint">${activeDay!==todayString()?'Past dates are for reviewing your records. Return to Today to advance your plan.':'Finish the assigned reading to check off your Bible habit. An unfinished reading resumes where you stopped.'}</p><button class="text-button" data-view="settings">Change reading plan</button>${read.length?`<div class="eyebrow" style="margin-top:22px">Chapters completed on this date</div><p class="muted-list">${read.map(escapeHTML).join(' · ')}</p>`:''}</section></main>`;
   }
   function renderActivity(){const h=state.habits.find(h=>h.id===editHabit)||state.habits.find(h=>h.kind==='activity');if(!h){view='today';return renderToday();}
     return `<main class="view-stack"><button class="back" data-view="today">← Back to today</button>${title('Keep moving.')}<p class="subtle">A little steady movement counts.</p><section class="panel activity-panel"><div class="eyebrow">${longDate(activeDay)}</div><h2 class="section-title">${escapeHTML(h.title)}</h2><p class="subtle">Your target is ${h.goal} minutes.</p><label class="form-label">Minutes active<input class="field" type="number" min="1" max="1440" id="activity-minutes" value="${h.goal}"/></label><button class="primary" data-action="log-activity" data-id="${h.id}">${isDone(h)?'Update completed activity':'Log activity and complete'}</button><p class="hint">This version logs your self-reported activity after meeting the goal. More detailed workouts can come later.</p></section></main>`;
@@ -177,11 +261,19 @@
     <div class="section-header"><h2 class="section-title">Last 21 days</h2><button class="text-button" data-action="export">Export data ↗</button></div><div class="history-list">${days.map(d=>`<button data-action="jump-day" data-day="${d}" class="history-row" style="cursor:pointer;text-align:left;border:1px solid #e5ebe1"><span><strong style="font-size:13px">${longDate(d,{weekday:'short',month:'short',day:'numeric'})}</strong><div class="mini-track"><span style="width:${pct(d)}%"></span></div></span><span class="history-icons">${dayDone(d)} / ${state.habits.length} completed ${state.photos[d]?'· 📷':''}</span></button>`).join('')}</div>
     <div class="section-header" style="margin-top:27px"><h2 class="section-title">Daily photo journal</h2><span class="small-label">${allPhotos.length} moments</span></div>${allPhotos.length?`<div class="photo-grid">${allPhotos.slice(0,45).map(d=>`<button class="photo-cell" style="border:0;padding:0" data-action="jump-day" data-day="${d}" data-photo-day="${d}"><span>${d}</span></button>`).join('')}</div>`:'<div class="empty">Your daily pictures will appear here as a visual record of growth.</div>'}</main>`;
   }
+  function renderPlanPreview(plan,goal){
+    const descriptions={gospel:'Start with Matthew, then alternate Gospel readings with Law, Psalms, Epistles, Proverbs, History, Prophets and Wisdom. The Gospels continue through Mark, Luke and John, then repeat.',year:'Read the complete 66-book Bible from Genesis to Revelation in 365 readings. This plan sets its own goal of 3 or 4 chapters, instead of your custom chapter count. Read every day to finish in a year; missed days extend the finish date.',sequential:'Continue book by book from your existing straight-through bookmark, with your chosen daily chapter goal.'};
+    const upcoming=planAssignment(plan,state.settings?.readingProgress?.[plan],goal,state.readingIndex);
+    const example=upcoming.indices.map(i=>CHAPTERS[i]).join(' · ');
+    return `<p class="subtle">${descriptions[plan]}</p><div class="auth-panel"><div class="eyebrow">Next reading · ${escapeHTML(upcoming.label)}</div><p class="muted-list">${escapeHTML(example||'Plan complete')}</p></div>`;
+  }
+  function updateReadingPreview(){const plan=document.querySelector('#reading-plan')?.value,goal=Number(document.querySelector('#reading-goal')?.value);if(!PLAN_NAMES[plan])return;document.querySelector('#reading-goal').disabled=plan==='year';document.querySelector('#reading-plan-preview').innerHTML=renderPlanPreview(plan,Math.max(1,Math.min(100,goal||3)));}
   function renderSettings(){const auth=cloud(),email=user?.email||'';
     return `<main class="view-stack">${title('Make it yours.')}<p class="subtle">Choose what matters. Adjust your practices as your season of life changes.</p>
     <section class="panel" style="margin-top:24px"><h2 class="section-title">Your name</h2><p class="subtle">Make your Today page feel like yours. Leave this blank to use the default heading.</p><form id="profile-form"><label class="form-label">Preferred name<input class="field" id="preferred-name" name="preferredName" maxlength="60" autocomplete="given-name" value="${escapeHTML(state.settings?.preferredName||'')}" placeholder="e.g. Dennis"/></label><p class="hint">${auth?'Your name syncs with your account across devices.':'Your name stays in this browser while using local demo mode.'}</p><button class="primary" type="submit">Save name</button></form></section>
     <section class="panel" style="margin-top:24px"><div class="flex-between"><h2 class="section-title">Your daily habits</h2><span class="badge-small">${state.habits.length} active</span></div><p class="subtle">Tap Edit to change a target, or add something new.</p>${state.habits.map(h=>`<div class="settings-habit"><span><strong>${escapeHTML(h.title)}</strong><br/><small>${goalText(h)}</small></span><div><button data-action="edit-habit" data-id="${h.id}">Edit</button> <button data-action="delete-habit" data-id="${h.id}" aria-label="Delete ${escapeHTML(h.title)}">✕</button></div></div>`).join('')}<button class="secondary" data-action="new-habit" style="margin-top:10px">+ Add a habit</button></section>
     <section class="panel" style="margin-top:17px"><h2 class="section-title">Bible reading plan</h2><p class="subtle">The default follows the 66-book Protestant Bible in order. Select your starting chapter to jump to another book.</p><div class="form-grid"><label class="form-label">Book<select class="field" id="book-select">${BOOKS.map(([b],i)=>`<option value="${i}" ${bookForIndex(state.readingIndex)===i?'selected':''}>${escapeHTML(b)}</option>`).join('')}</select></label><label class="form-label">Chapter<select class="field" id="chapter-select">${chapterOptions(bookForIndex(state.readingIndex),state.readingIndex)}</select></label></div><button class="secondary" data-action="set-reading-start">Set next chapter</button><p class="hint">Changing the starting point does not erase past reading records.</p></section>
+    <section class="panel" style="margin-top:17px"><h2 class="section-title">Daily Bible reading</h2><form id="reading-plan-form"><label class="form-label">How many chapters per reading day?<input class="field" id="reading-goal" name="chapters" type="number" min="1" max="100" required value="${readingChapterGoal()}"/></label><label class="form-label">Choose your reading rhythm<select class="field" id="reading-plan" name="plan">${Object.entries(PLAN_NAMES).map(([key,name])=>`<option value="${key}" ${readingPlan()===key?'selected':''}>${name}${key==='gospel'?' (recommended)':''}</option>`).join('')}</select></label><div id="reading-plan-preview">${renderPlanPreview(readingPlan(),readingChapterGoal())}</div><button class="primary" type="submit">Save reading plan</button><p class="hint">Each plan remembers its own place. Switching plans preserves your reading history and other bookmarks. A changed chapter goal applies to the next new reading.</p></form></section>
     <section class="panel" style="margin-top:17px" id="account-panel"><h2 class="section-title">Account & syncing</h2>${auth?`<div class="auth-panel"><div class="eyebrow">✓ Secure cloud mode</div><p class="subtle">Signed in as <strong>${escapeHTML(email)}</strong>. Your data syncs through your Supabase project.</p><button class="secondary" data-action="refresh">Refresh from cloud</button> <button class="danger" data-action="sign-out">Sign out</button></div>`:configured?`<div class="auth-panel"><div class="eyebrow">Optional — Sync across devices</div><p class="subtle">Currently in local demo mode. Sign in by email to use the private Supabase database. Demo data is not migrated automatically.</p><form id="login-form" class="login-email"><label class="form-label">Email address<input class="field" id="login-email" type="email" required placeholder="you@example.com"/></label><button class="primary" type="submit">Email me a sign-in link</button></form></div>`:`<div class="auth-panel"><div class="eyebrow">Local demo mode</div><p class="subtle">This installation is not yet linked to Supabase. Your habits and writing stay in this browser, and photos use this device's browser storage.</p><p class="note">To enable private cross-device sync, complete the instructions in README.md and fill in config.js before deploying.</p></div>`}<div class="flex-between"><div><strong style="font-size:13px">Export your records</strong><p class="note" style="margin:5px 0">Downloads habits, progress, reading and writing as JSON. Photos are not included.</p></div><button class="secondary" data-action="export">Export JSON</button></div></section>
     <div style="margin-top:20px;text-align:center" class="note">KNOWN Formation Labs · Version 0.1 · Built for meaningful daily formation, not perfect streaks.</div></main>`;
   }
@@ -223,6 +315,7 @@
     else if(action==='finish-writing'){await syncWriting(activeDay,document.querySelector('#writing-editor')?.value||state.writing[activeDay]||'');const wh=state.habits.find(h=>h.kind==='writing');if(wh&&countWords(state.writing[activeDay]||'')>=wh.goal){await markComplete(wh,true,{words:countWords(state.writing[activeDay])});toast('Writing complete for today!');}else toast('Keep writing to reach your goal.',true);}
     else if(action==='retry-scripture'){bibleRequested='';if(versionsStatus==='error')versionsStatus='idle';loadVersions();if(versionsStatus==='ready')loadChapter();}
     else if(action==='read-chapter'){if(busy)return;busy=true;button.disabled=true;try{const ref=CHAPTERS[state.readingIndex%CHAPTERS.length];if(!state.readings[activeDay])state.readings[activeDay]=[];state.readings[activeDay].push(ref);state.readingIndex++;await syncReading();const rh=state.habits.find(h=>h.kind==='reading');if(rh&&state.readings[activeDay].length>=rh.goal&&!isDone(rh))await markComplete(rh,true,{chapters:state.readings[activeDay].length});else render();toast(`${ref} recorded`);}finally{busy=false;}}
+    else if(action==='read-chapter')await finishReadingChapter();
     else if(action==='log-activity'){const mins=+document.querySelector('#activity-minutes')?.value;if(!h)return;if(!Number.isFinite(mins)||mins<h.goal){toast(`Enter at least ${h.goal} minutes to complete this habit.`,true);return;}await markComplete(h,true,{minutes:mins});toast('Activity logged');}
     else if(action==='jump-day'){activeDay=button.dataset.day;view='today';render();window.scrollTo(0,0);}
     else if(action==='export')exportData();
@@ -233,13 +326,27 @@
     else if(action==='sign-out'){try{await client.auth.signOut();user=null;versions=[];versionsStatus='idle';bibleContent=null;bibleRequested='';state=localLoad();view='today';render();toast('Signed out. Using local demo.');}catch(err){noteError(err);}}
     else if(action==='refresh'){try{await loadCloud();toast('Synced latest changes');}catch(err){noteError(err);}}
   }
+  async function saveReadingPlan(form){
+    const data=new FormData(form),plan=String(data.get('plan'));
+    const goal=plan==='year'?readingChapterGoal():Number(data.get('chapters'));
+    if(!PLAN_NAMES[plan]||!Number.isInteger(goal)||goal<1||goal>100){toast('Choose a whole number from 1 to 100 chapters.',true);return;}
+    const button=form.querySelector('button[type="submit"]');button.disabled=true;
+    const settings={...state.settings,readingPlan:plan,readingDailyChapters:goal};
+    try{
+      if(cloud())await required(client.from('daily_profiles').update({settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));
+      else localStorage.setItem(STORAGE_KEY,JSON.stringify({...state,settings}));
+      state.settings=settings;bibleRequested='';bibleContent=null;render();toast('Reading plan saved');
+    }catch(err){noteError(err);button.disabled=false;}
+  }
   async function flushWriting(){if(view!=='writing')return;const textarea=document.querySelector('#writing-editor');const pending=!!draftTimer;if(draftTimer){clearTimeout(draftTimer);draftTimer=null;}if(textarea&&(pending||state.writing[activeDay]!==textarea.value))await syncWriting(activeDay,textarea.value);}
   function handleInput(e){if(e.target.id==='writing-editor'){const content=e.target.value,number=countWords(content),wh=state.habits.find(h=>h.kind==='writing'),goal=wh?.goal||500;state.writing[activeDay]=content;document.querySelector('#word-count').textContent=number;document.querySelector('#writing-progress').style.width=`${Math.min(100,100*number/goal)}%`;const finish=document.querySelector('#writing-complete');finish.disabled=number<goal;setSyncMessage('Saving…');if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(()=>syncWriting(activeDay,content),850);
     } else if(e.target.id==='book-select'){selectBookOptions();}else if(e.target.id==='kind-select'){updateKindFields();}}
+    } else if(['reading-plan','reading-goal'].includes(e.target.id)){updateReadingPreview();}else if(e.target.id==='kind-select'){updateKindFields();}}
   root.addEventListener('click',e=>{handleClick(e).catch(noteError);});
   root.addEventListener('input',handleInput);
   root.addEventListener('change',e=>{if(e.target.id==='photo-input')photoUpload(e.target.files[0]);else if(e.target.id==='bible-version'){state.settings.bibleVersionId=e.target.value;bibleRequested='';bibleContent=null;saveProfile();render();}});
   root.addEventListener('submit', async e=>{e.preventDefault();if(e.target.id==='profile-form'){
+  root.addEventListener('submit', async e=>{e.preventDefault();if(e.target.id==='reading-plan-form'){await saveReadingPlan(e.target);}else if(e.target.id==='profile-form'){
       const preferredName=String(new FormData(e.target).get('preferredName')||'').trim();
       if(preferredName.length>60){toast('Enter a name up to 60 characters.',true);return;}
       const button=e.target.querySelector('button[type="submit"]');button.disabled=true;
