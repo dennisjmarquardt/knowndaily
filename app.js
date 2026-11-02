@@ -29,6 +29,12 @@
   const newState = () => ({habits:defaultHabits(),completions:[],writing:{},readings:{},photos:{},readingIndex:0,settings:{}});
   let versions=[], versionsStatus='idle', bibleContent=null, bibleRequested='', bibleError='';
   let state, client, user=null, view='today', activeDay=todayString(), editHabit=null, draftTimer=null, activityDraft='30', busy=false, photoUrls=[], authMode='signup';
+  const writingSaves=new Map(), completionSaves=new Set();
+  const draftKey=(userId,day)=>`known-daily-unsynced:${userId}:${day}`;
+  function cacheWriting(userId,day,content){
+    try{localStorage.setItem(draftKey(userId,day),JSON.stringify({content,savedAt:Date.now()}));}
+    catch{toast('Cannot retain a local writing backup. Export your writing.',true);}
+  }
   const STORAGE_KEY='known-daily-demo-v1';
   function localLoad() { try { const s=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(s && Array.isArray(s.habits))return {...newState(),...s}; } catch {} return newState(); }
   function localSave(){ if (!user) { try {localStorage.setItem(STORAGE_KEY,JSON.stringify(state));} catch(e){toast('Device storage is full. Export your data.',true);} } }
@@ -39,11 +45,17 @@
   async function loadCloud(){
     if(!cloud())return;
     let profile = await required(client.from('daily_profiles').select('*').eq('user_id',user.id).maybeSingle());
+    // Insert defaults before the profile marker; if initialization fails, the next login can retry.
     if(!profile){
-      await required(client.from('daily_profiles').insert({user_id:user.id,reading_index:0,settings:{}}));
-      await required(client.from('daily_habits').insert(defaultHabits().map(h=>({...toHabitRow(h),user_id:user.id}))));
-      profile={reading_index:0,settings:{}};
+      const existing=await required(client.from('daily_habits').select('id').eq('user_id',user.id).limit(1));
+      if(!existing.length){
+        await required(client.from('daily_habits').insert(defaultHabits().map(h=>({...toHabitRow(h),user_id:user.id}))));
+      }
+      await required(client.from('daily_profiles').upsert({user_id:user.id,reading_index:0,settings:{}},{onConflict:'user_id'}));
+      profile=await required(client.from('daily_profiles').select('*').eq('user_id',user.id).single());
     }
+    // Avoid discarding a pending save when this device refreshes from cloud.
+    await Promise.allSettled([...writingSaves.values()]);
     const [habits,logs,writing,readings,photos] = await Promise.all([
       required(client.from('daily_habits').select('*').eq('user_id',user.id).order('position')),
       required(client.from('daily_completions').select('*').eq('user_id',user.id)),
@@ -59,6 +71,16 @@
       photos:Object.fromEntries(photos.map(p=>[p.day,p.path])),
       readingIndex:profile.reading_index||0,settings:profile.settings||{}
     };
+    // An interrupted upload must not silently destroy a local writing draft.
+    for(const day of Object.keys(state.writing)){
+      try{
+        const draft=JSON.parse(localStorage.getItem(draftKey(user.id,day))||'null');
+        if(draft && typeof draft.content==='string' && draft.content!==state.writing[day]){
+          state.writing[day]=draft.content;
+          toast('Unsynced writing recovered on this device. Open Writing to retry saving.',true);
+        }
+      }catch{}
+    }
     render();
   }
   function toHabitRow(h) {return {id:h.id,title:h.title,kind:h.kind,goal:h.goal||1,target_time:h.targetTime||null,position:h.position||0};}
@@ -68,25 +90,52 @@
   const dayDone = (day=activeDay) => state.habits.filter(h=>isDone(h,day)).length;
   function pct(day=activeDay){return state.habits.length ? Math.round(100*dayDone(day)/state.habits.length) : 0;}
   async function markComplete(h,done,details={}) {
-    state.completions=state.completions.filter(c=>!(c.habit_id===h.id&&c.day===activeDay));
-    if(done)state.completions.push({habit_id:h.id,day:activeDay,details});
+    const day=activeDay, key=`${h.id}:${day}`;
+    if(completionSaves.has(key))return false;
+    completionSaves.add(key);
+    const before=state.completions.filter(c=>c.habit_id===h.id&&c.day===day);
+    state.completions=state.completions.filter(c=>!(c.habit_id===h.id&&c.day===day));
+    if(done)state.completions.push({habit_id:h.id,day,details});
     render();
-    try {if(cloud()) {
-      if(done)await required(client.from('daily_completions').upsert({user_id:user.id,habit_id:h.id,day:activeDay,details},{onConflict:'user_id,habit_id,day'}));
-      else await required(client.from('daily_completions').delete().eq('user_id',user.id).eq('habit_id',h.id).eq('day',activeDay));
-    } else localSave();} catch(e){noteError(e);}
+    try{
+      if(cloud()){
+        if(done)await required(client.from('daily_completions').upsert({user_id:user.id,habit_id:h.id,day,details},{onConflict:'user_id,habit_id,day'}));
+        else await required(client.from('daily_completions').delete().eq('user_id',user.id).eq('habit_id',h.id).eq('day',day));
+      }else localSave();
+      return true;
+    }catch(e){
+      state.completions=state.completions.filter(c=>!(c.habit_id===h.id&&c.day===day)).concat(before);
+      render();noteError(e);return false;
+    }finally{completionSaves.delete(key);}
   }
   async function syncWriting(day,text) {
     state.writing[day]=text;
-    try { if(cloud()) await required(client.from('daily_writing').upsert({user_id:user.id,day,content:text,word_count:countWords(text),updated_at:new Date().toISOString()},{onConflict:'user_id,day'}));else localSave();
-      setSyncMessage('Saved');
-    }catch(e){setSyncMessage('Not saved');noteError(e);}
+    if(!cloud()){localSave();setSyncMessage('Saved on this device');return true;}
+    const userId=user.id, key=`${userId}:${day}`;
+    cacheWriting(userId,day,text);
+    // Serialize all writes for a given day. Each queued operation saves the newest draft,
+    // preventing an earlier request from finishing after a newer one.
+    const preceding=writingSaves.get(key)||Promise.resolve();
+    const operation=preceding.catch(()=>{}).then(async()=>{
+      if(!user||user.id!==userId)throw new Error('Account changed before saving.');
+      const latest=state.writing[day]||'';
+      await required(client.from('daily_writing').upsert({user_id:userId,day,content:latest,word_count:countWords(latest),updated_at:new Date().toISOString()},{onConflict:'user_id,day'}));
+      try{
+        const cached=JSON.parse(localStorage.getItem(draftKey(userId,day))||'null');
+        if(cached?.content===latest)localStorage.removeItem(draftKey(userId,day));
+      }catch{}
+      if(view==='writing'&&activeDay===day&&state.writing[day]===latest)setSyncMessage('Saved to cloud');
+    });
+    writingSaves.set(key,operation);
+    try{await operation;return true;}
+    catch(e){setSyncMessage('Not saved — draft retained on this device');noteError(e);return false;}
+    finally{if(writingSaves.get(key)===operation)writingSaves.delete(key);}
   }
   async function syncReading(){
     try {if(cloud())await Promise.all([
       required(client.from('daily_readings').upsert({user_id:user.id,day:activeDay,chapters:state.readings[activeDay],updated_at:new Date().toISOString()},{onConflict:'user_id,day'})),
       required(client.from('daily_profiles').update({reading_index:state.readingIndex,updated_at:new Date().toISOString()}).eq('user_id',user.id))
-    ]);else localSave();}catch(e){noteError(e);}
+    ]);else localSave();return true;}catch(e){noteError(e);return false;}
   }
   async function saveProfile(){try{if(cloud())await required(client.from('daily_profiles').update({reading_index:state.readingIndex,settings:state.settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));else localSave();}catch(e){noteError(e);}}
   function setSyncMessage(m){const el=document.querySelector('#sync-message');if(el)el.textContent=m;}
@@ -181,7 +230,7 @@
     <section class="panel" style="margin-top:24px"><div class="flex-between"><h2 class="section-title">Your daily habits</h2><span class="badge-small">${state.habits.length} active</span></div><p class="subtle">Tap Edit to change a target, or add something new.</p>${state.habits.map(h=>`<div class="settings-habit"><span><strong>${escapeHTML(h.title)}</strong><br/><small>${goalText(h)}</small></span><div><button data-action="edit-habit" data-id="${h.id}">Edit</button> <button data-action="delete-habit" data-id="${h.id}" aria-label="Delete ${escapeHTML(h.title)}">✕</button></div></div>`).join('')}<button class="secondary" data-action="new-habit" style="margin-top:10px">+ Add a habit</button></section>
     <section class="panel" style="margin-top:17px"><h2 class="section-title">Bible reading plan</h2><p class="subtle">The default follows the 66-book Protestant Bible in order. Select your starting chapter to jump to another book.</p><div class="form-grid"><label class="form-label">Book<select class="field" id="book-select">${BOOKS.map(([b],i)=>`<option value="${i}" ${bookForIndex(state.readingIndex)===i?'selected':''}>${escapeHTML(b)}</option>`).join('')}</select></label><label class="form-label">Chapter<select class="field" id="chapter-select">${chapterOptions(bookForIndex(state.readingIndex),state.readingIndex)}</select></label></div><button class="secondary" data-action="set-reading-start">Set next chapter</button><p class="hint">Changing the starting point does not erase past reading records.</p></section>
     <section class="panel" style="margin-top:17px" id="account-panel"><h2 class="section-title">Account & syncing</h2>${auth?`<div class="auth-panel"><div class="eyebrow">✓ Secure cloud mode</div><p class="subtle">Signed in as <strong>${escapeHTML(email)}</strong>. Your data syncs through your Supabase project.</p><button class="secondary" data-action="refresh">Refresh from cloud</button> <button class="danger" data-action="sign-out">Sign out</button></div>`:configured?`<div class="auth-panel"><div class="eyebrow">Your KNOWN Daily account</div><h3 class="auth-heading">${authMode==='signup'?'Create your account':'Welcome back'}</h3><p class="subtle">${authMode==='signup'?'Save your habits, writing, and reading progress securely, and pick up where you left off on any device.':'Sign in to access your saved habits, writing, and reading progress across devices.'}</p><form id="login-form" class="login-email"><label class="form-label">Email address<input class="field" id="login-email" type="email" autocomplete="email" required placeholder="you@example.com"/></label><button class="primary" type="submit">${authMode==='signup'?'Create account':'Email me a sign-in link'}</button></form><div class="auth-switch">${authMode==='signup'?'Already have an account?':'New to KNOWN Daily?'} <button type="button" class="inline-button" data-action="auth-switch">${authMode==='signup'?'Sign in':'Create an account'}</button></div><p class="note">${authMode==='signup'?'We’ll email you a secure link to confirm your address and sign in.':'No password needed. We’ll email you a secure sign-in link.'} Or continue exploring the limited guest demo on this device. Demo data will not sync or transfer automatically.</p></div>`:`<div class="auth-panel"><div class="eyebrow">Local demo mode</div><p class="subtle">This installation is not yet linked to Supabase. Your habits and writing stay in this browser, and photos use this device's browser storage.</p><p class="note">To enable private cross-device sync, complete the instructions in README.md and fill in config.js before deploying.</p></div>`}<div class="flex-between"><div><strong style="font-size:13px">Export your records</strong><p class="note" style="margin:5px 0">Downloads habits, progress, reading and writing as JSON. Photos are not included.</p></div><button class="secondary" data-action="export">Export JSON</button></div></section>
-    <div style="margin-top:20px;text-align:center" class="note">KNOWN Formation Labs · Version 0.3 · Built for meaningful daily formation, not perfect streaks.</div></main>`;
+    <div style="margin-top:20px;text-align:center" class="note">KNOWN Formation Labs · Version 0.4 · Built for meaningful daily formation, not perfect streaks.</div></main>`;
   }
   function bookForIndex(idx){let count=0;for(let i=0;i<BOOKS.length;i++){count+=BOOKS[i][1];if(idx%CHAPTERS.length <count)return i;}return 0;}
   function chapterOptions(b,idx){let before=BOOKS.slice(0,b).reduce((n,book)=>n+book[1],0);return Array.from({length:BOOKS[b][1]},(_,i)=>`<option value="${i+1}" ${idx%CHAPTERS.length===before+i?'selected':''}>${i+1}</option>`).join('');}
@@ -204,7 +253,7 @@
     if(!Number.isFinite(goal)||goal<1||goal>10000){toast('Choose a goal from 1 to 10,000.',true);return;}
     const h=editHabit ? state.habits.find(h=>h.id===editHabit) : {id:uid(),position:state.habits.length};if(!h)return;
     Object.assign(h,{title,kind,goal:kind==='time'||kind==='bed'||kind==='check'?1:goal,targetTime:time});
-    if(!editHabit)state.habits.push(h);view='settings';editHabit=null;render();try{await persistHabit(h);toast('Habit saved');}catch(e){noteError(e);}
+    if(!editHabit)state.habits.push(h);view='settings';editHabit=null;render();try{await persistHabit(h);toast('Habit saved');}catch(e){noteError(e);await loadCloud().catch(noteError);}
   }
   function renderHabitForm(){const h=editHabit?state.habits.find(x=>x.id===editHabit):null;const pane=document.createElement('div');pane.id='habit-form-wrap';pane.className='panel';pane.style.marginTop='17px';pane.innerHTML=`<h2 class="section-title">${h?'Edit':'Add'} a habit</h2><form id="habit-form"><label class="form-label">Practice name<input class="field" name="title" maxlength="90" required value="${escapeHTML(h?.title||'')}" placeholder="e.g. Practice gratitude"/></label><label class="form-label">Type<select class="field" name="kind" id="kind-select">${[['check','Simple checklist'],['time','Morning wake time'],['bed','Bedtime'],['reading','Bible reading'],['writing','Writing space'],['activity','Activity minutes']].map(([k,v])=>`<option value="${k}" ${h?.kind===k?'selected':''}>${v}</option>`).join('')}</select></label><div class="form-grid"><label class="form-label" id="goal-field">Daily quantity<input class="field" name="goal" type="number" min="1" max="10000" value="${h?.goal||1}"/></label><label class="form-label" id="time-field">Target time<input class="field" name="time" type="time" value="${h?.targetTime||'06:30'}"/></label></div><button type="submit" class="primary">Save practice</button> <button class="secondary" type="button" data-action="cancel-habit">Cancel</button></form>`;
     const account=document.querySelector('#account-panel');account.parentNode.insertBefore(pane,account);updateKindFields();pane.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -218,22 +267,22 @@
     if(action==='prev-day'||action==='next-day'){activeDay=plusDays(activeDay,action==='prev-day'?-1:1);render();}
     else if(action==='open-habit'||action==='toggle-habit'){if(!h)return;const special=['writing','reading','activity'].includes(h.kind);if(special){view=h.kind;editHabit=h.id;render();window.scrollTo(0,0);}else markComplete(h,!isDone(h));}
     else if(action==='open-photo'){document.querySelector('#photo-input')?.click();}
-    else if(action==='finish-writing'){await syncWriting(activeDay,document.querySelector('#writing-editor')?.value||state.writing[activeDay]||'');const wh=state.habits.find(h=>h.kind==='writing');if(wh&&countWords(state.writing[activeDay]||'')>=wh.goal){await markComplete(wh,true,{words:countWords(state.writing[activeDay])});toast('Writing complete for today!');}else toast('Keep writing to reach your goal.',true);}
+    else if(action==='finish-writing'){const saved=await syncWriting(activeDay,document.querySelector('#writing-editor')?.value||state.writing[activeDay]||'');if(!saved){toast('Writing not synced. Your local recovery draft was kept.',true);return;}const wh=state.habits.find(h=>h.kind==='writing');if(wh&&countWords(state.writing[activeDay]||'')>=wh.goal){if(await markComplete(wh,true,{words:countWords(state.writing[activeDay])}))toast('Writing complete for today!');}else toast('Keep writing to reach your goal.',true);}
     else if(action==='retry-scripture'){bibleRequested='';if(versionsStatus==='error')versionsStatus='idle';loadVersions();if(versionsStatus==='ready')loadChapter();}
-    else if(action==='read-chapter'){if(busy)return;busy=true;button.disabled=true;try{const ref=CHAPTERS[state.readingIndex%CHAPTERS.length];if(!state.readings[activeDay])state.readings[activeDay]=[];state.readings[activeDay].push(ref);state.readingIndex++;await syncReading();const rh=state.habits.find(h=>h.kind==='reading');if(rh&&state.readings[activeDay].length>=rh.goal&&!isDone(rh))await markComplete(rh,true,{chapters:state.readings[activeDay].length});else render();toast(`${ref} recorded`);}finally{busy=false;}}
+    else if(action==='read-chapter'){if(busy)return;busy=true;button.disabled=true;const day=activeDay,oldIndex=state.readingIndex,oldRead=[...(state.readings[day]||[])];try{const ref=CHAPTERS[state.readingIndex%CHAPTERS.length];if(!state.readings[day])state.readings[day]=[];state.readings[day].push(ref);state.readingIndex++;if(!(await syncReading())){state.readingIndex=oldIndex;state.readings[day]=oldRead;render();return;}const rh=state.habits.find(h=>h.kind==='reading');if(rh&&state.readings[day].length>=rh.goal&&!isDone(rh)){if(await markComplete(rh,true,{chapters:state.readings[day].length}))toast(`${ref} recorded`);}else{render();toast(`${ref} recorded`);}}finally{busy=false;}}
     else if(action==='log-activity'){const mins=+document.querySelector('#activity-minutes')?.value;if(!h)return;if(!Number.isFinite(mins)||mins<h.goal){toast(`Enter at least ${h.goal} minutes to complete this habit.`,true);return;}await markComplete(h,true,{minutes:mins});toast('Activity logged');}
     else if(action==='jump-day'){activeDay=button.dataset.day;view='today';render();window.scrollTo(0,0);}
     else if(action==='export')exportData();
     else if(action==='new-habit'||action==='edit-habit'){editHabit=action==='edit-habit'?id:null;document.querySelector('#habit-form-wrap')?.remove();renderHabitForm();}
     else if(action==='cancel-habit'){document.querySelector('#habit-form-wrap')?.remove();editHabit=null;}
-    else if(action==='delete-habit'){if(!h||!confirm(`Delete “${h.title}”? This also removes its completion checkmarks.`))return;state.habits=state.habits.filter(x=>x.id!==id);state.completions=state.completions.filter(x=>x.habit_id!==id);render();try{await removeHabit(id);toast('Habit removed');}catch(err){noteError(err);}}
+    else if(action==='delete-habit'){if(!h||!confirm(`Delete “${h.title}”? This also removes its completion checkmarks.`))return;try{if(cloud())await removeHabit(id);state.habits=state.habits.filter(x=>x.id!==id);state.completions=state.completions.filter(x=>x.habit_id!==id);if(!cloud())localSave();render();toast('Habit removed');}catch(err){noteError(err);}}
     else if(action==='set-reading-start'){const b=+document.querySelector('#book-select')?.value,chapter=+document.querySelector('#chapter-select')?.value;if(!BOOKS[b]||chapter<1||chapter>BOOKS[b][1])return;state.readingIndex=BOOKS.slice(0,b).reduce((n,x)=>n+x[1],0)+chapter-1;await saveProfile();toast('Reading plan updated');render();}
     else if(action==='auth-switch'){authMode=authMode==='signup'?'signin':'signup';render();document.querySelector('#login-email')?.focus();}
     else if(action==='sign-out'){try{await client.auth.signOut();user=null;versions=[];versionsStatus='idle';bibleContent=null;bibleRequested='';state=localLoad();view='today';render();toast('Signed out. Using local demo.');}catch(err){noteError(err);}}
-    else if(action==='refresh'){try{await loadCloud();toast('Synced latest changes');}catch(err){noteError(err);}}
+    else if(action==='refresh'){try{await flushWriting();await loadCloud();toast('Cloud refresh finished');}catch(err){noteError(err);}}
   }
   async function flushWriting(){if(view!=='writing')return;const textarea=document.querySelector('#writing-editor');const pending=!!draftTimer;if(draftTimer){clearTimeout(draftTimer);draftTimer=null;}if(textarea&&(pending||state.writing[activeDay]!==textarea.value))await syncWriting(activeDay,textarea.value);}
-  function handleInput(e){if(e.target.id==='writing-editor'){const content=e.target.value,number=countWords(content),wh=state.habits.find(h=>h.kind==='writing'),goal=wh?.goal||500;state.writing[activeDay]=content;document.querySelector('#word-count').textContent=number;document.querySelector('#writing-progress').style.width=`${Math.min(100,100*number/goal)}%`;const finish=document.querySelector('#writing-complete');finish.disabled=number<goal;setSyncMessage('Saving…');if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(()=>syncWriting(activeDay,content),850);
+  function handleInput(e){if(e.target.id==='writing-editor'){const content=e.target.value,number=countWords(content),wh=state.habits.find(h=>h.kind==='writing'),goal=wh?.goal||500;state.writing[activeDay]=content;if(cloud())cacheWriting(user.id,activeDay,content);document.querySelector('#word-count').textContent=number;document.querySelector('#writing-progress').style.width=`${Math.min(100,100*number/goal)}%`;const finish=document.querySelector('#writing-complete');finish.disabled=number<goal;setSyncMessage('Saving…');if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(()=>syncWriting(activeDay,content),850);
     } else if(e.target.id==='book-select'){selectBookOptions();}else if(e.target.id==='kind-select'){updateKindFields();}}
   root.addEventListener('click',e=>{handleClick(e).catch(noteError);});
   root.addEventListener('input',handleInput);
