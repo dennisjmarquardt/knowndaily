@@ -72,15 +72,22 @@
       readingIndex:profile.reading_index||0,settings:profile.settings||{}
     };
     // An interrupted upload must not silently destroy a local writing draft.
-    for(const day of Object.keys(state.writing)){
-      try{
-        const draft=JSON.parse(localStorage.getItem(draftKey(user.id,day))||'null');
+    try{
+      const prefix=`known-daily-unsynced:${user.id}:`;
+      let recovered=false;
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(!key?.startsWith(prefix))continue;
+        const day=key.slice(prefix.length);
+        if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(day))continue;
+        const draft=JSON.parse(localStorage.getItem(key)||'null');
         if(draft && typeof draft.content==='string' && draft.content!==state.writing[day]){
-          state.writing[day]=draft.content;
-          toast('Unsynced writing recovered on this device. Open Writing to retry saving.',true);
+          // Prefer retention to silently replacing a possibly newer cloud draft.
+          state.writing[day]=draft.content;recovered=true;
         }
-      }catch{}
-    }
+      }
+      if(recovered)toast('Unsynced writing recovered locally. Review and save your draft before switching devices.',true);
+    }catch(e){console.warn('Could not inspect local recovery drafts',e);}
     render();
   }
   function toHabitRow(h) {return {id:h.id,title:h.title,kind:h.kind,goal:h.goal||1,target_time:h.targetTime||null,position:h.position||0};}
@@ -137,10 +144,10 @@
       required(client.from('daily_profiles').update({reading_index:state.readingIndex,updated_at:new Date().toISOString()}).eq('user_id',user.id))
     ]);else localSave();return true;}catch(e){noteError(e);return false;}
   }
-  async function saveProfile(){try{if(cloud())await required(client.from('daily_profiles').update({reading_index:state.readingIndex,settings:state.settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));else localSave();}catch(e){noteError(e);}}
+  async function saveProfile(){try{if(cloud())await required(client.from('daily_profiles').update({reading_index:state.readingIndex,settings:state.settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));else localSave();return true;}catch(e){noteError(e);return false;}}
   function setSyncMessage(m){const el=document.querySelector('#sync-message');if(el)el.textContent=m;}
   const title = (x) => `<div class="eyebrow">KNOWN FORMATION LABS</div><h1 class="headline">${x}</h1>`;
-  function header(){return `<div class="topbar"><div class="brand"><div class="mark">K</div><div><div class="brand-title">KNOWN <span style="font-weight:normal;color:#6b8b79">daily.</span></div><div class="brand-small">Formation Labs · Pay Attention</div></div></div><div class="top-actions"><button class="pill" data-view="settings" title="Open your account and settings"><span class="pill-dot ${cloud()?'cloud':''}"></span>${cloud()?'Synced':'This device'}</button><button class="iconbutton" aria-label="Settings" data-view="settings">⚙</button></div></div><nav class="tabs" aria-label="Main navigation"><button class="tab ${view==='today'?'current':''}" data-view="today">Today</button><button class="tab ${view==='history'?'current':''}" data-view="history">History</button><button class="tab ${view==='settings'?'current':''}" data-view="settings">Customize</button></nav>`;}
+  function header(){return `<div class="topbar"><div class="brand"><div class="mark">K</div><div><div class="brand-title">KNOWN <span style="font-weight:normal;color:#6b8b79">daily.</span></div><div class="brand-small">Formation Labs · Pay Attention</div></div></div><div class="top-actions"><button class="pill" data-view="settings" title="Open your account and settings"><span class="pill-dot ${cloud()?'cloud':''}"></span>${cloud()?'Synced':configured?'Sign in / Create account':'Guest demo'}</button><button class="iconbutton" aria-label="Settings" data-view="settings">⚙</button></div></div><nav class="tabs" aria-label="Main navigation"><button class="tab ${view==='today'?'current':''}" data-view="today">Today</button><button class="tab ${view==='history'?'current':''}" data-view="history">History</button><button class="tab ${view==='settings'?'current':''}" data-view="settings">Customize</button></nav>`;}
   function render(){
     if(!state)return;
     photoUrls.forEach(u=>URL.revokeObjectURL(u));photoUrls=[];
@@ -253,7 +260,7 @@
     if(!Number.isFinite(goal)||goal<1||goal>10000){toast('Choose a goal from 1 to 10,000.',true);return;}
     const h=editHabit ? state.habits.find(h=>h.id===editHabit) : {id:uid(),position:state.habits.length};if(!h)return;
     Object.assign(h,{title,kind,goal:kind==='time'||kind==='bed'||kind==='check'?1:goal,targetTime:time});
-    if(!editHabit)state.habits.push(h);view='settings';editHabit=null;render();try{await persistHabit(h);toast('Habit saved');}catch(e){noteError(e);await loadCloud().catch(noteError);}
+    if(!editHabit)state.habits.push(h);view='settings';editHabit=null;render();try{await persistHabit(h);toast('Habit saved');}catch(e){noteError(e);if(cloud())await loadCloud().catch(noteError);}
   }
   function renderHabitForm(){const h=editHabit?state.habits.find(x=>x.id===editHabit):null;const pane=document.createElement('div');pane.id='habit-form-wrap';pane.className='panel';pane.style.marginTop='17px';pane.innerHTML=`<h2 class="section-title">${h?'Edit':'Add'} a habit</h2><form id="habit-form"><label class="form-label">Practice name<input class="field" name="title" maxlength="90" required value="${escapeHTML(h?.title||'')}" placeholder="e.g. Practice gratitude"/></label><label class="form-label">Type<select class="field" name="kind" id="kind-select">${[['check','Simple checklist'],['time','Morning wake time'],['bed','Bedtime'],['reading','Bible reading'],['writing','Writing space'],['activity','Activity minutes']].map(([k,v])=>`<option value="${k}" ${h?.kind===k?'selected':''}>${v}</option>`).join('')}</select></label><div class="form-grid"><label class="form-label" id="goal-field">Daily quantity<input class="field" name="goal" type="number" min="1" max="10000" value="${h?.goal||1}"/></label><label class="form-label" id="time-field">Target time<input class="field" name="time" type="time" value="${h?.targetTime||'06:30'}"/></label></div><button type="submit" class="primary">Save practice</button> <button class="secondary" type="button" data-action="cancel-habit">Cancel</button></form>`;
     const account=document.querySelector('#account-panel');account.parentNode.insertBefore(pane,account);updateKindFields();pane.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -276,7 +283,7 @@
     else if(action==='new-habit'||action==='edit-habit'){editHabit=action==='edit-habit'?id:null;document.querySelector('#habit-form-wrap')?.remove();renderHabitForm();}
     else if(action==='cancel-habit'){document.querySelector('#habit-form-wrap')?.remove();editHabit=null;}
     else if(action==='delete-habit'){if(!h||!confirm(`Delete “${h.title}”? This also removes its completion checkmarks.`))return;try{if(cloud())await removeHabit(id);state.habits=state.habits.filter(x=>x.id!==id);state.completions=state.completions.filter(x=>x.habit_id!==id);if(!cloud())localSave();render();toast('Habit removed');}catch(err){noteError(err);}}
-    else if(action==='set-reading-start'){const b=+document.querySelector('#book-select')?.value,chapter=+document.querySelector('#chapter-select')?.value;if(!BOOKS[b]||chapter<1||chapter>BOOKS[b][1])return;state.readingIndex=BOOKS.slice(0,b).reduce((n,x)=>n+x[1],0)+chapter-1;await saveProfile();toast('Reading plan updated');render();}
+    else if(action==='set-reading-start'){const b=+document.querySelector('#book-select')?.value,chapter=+document.querySelector('#chapter-select')?.value;if(!BOOKS[b]||chapter<1||chapter>BOOKS[b][1])return;const previousIndex=state.readingIndex;state.readingIndex=BOOKS.slice(0,b).reduce((n,x)=>n+x[1],0)+chapter-1;if(await saveProfile()){toast('Reading plan updated');}else{state.readingIndex=previousIndex;}render();}
     else if(action==='auth-switch'){authMode=authMode==='signup'?'signin':'signup';render();document.querySelector('#login-email')?.focus();}
     else if(action==='sign-out'){try{await client.auth.signOut();user=null;versions=[];versionsStatus='idle';bibleContent=null;bibleRequested='';state=localLoad();view='today';render();toast('Signed out. Using local demo.');}catch(err){noteError(err);}}
     else if(action==='refresh'){try{await flushWriting();await loadCloud();toast('Cloud refresh finished');}catch(err){noteError(err);}}
