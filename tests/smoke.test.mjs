@@ -7,7 +7,10 @@ const sql=readFileSync(new URL('../supabase-setup.sql',import.meta.url),'utf8');
 const proxy=readFileSync(new URL('../api/bible.mjs',import.meta.url),'utf8');
 
 test('account pathways remain separate and guest mode remains available',()=>{
-  assert.match(app,/shouldCreateUser:authMode==='signup'/);
+  assert.match(app,/auth\.signUp\(\{email,password/);
+  assert.match(app,/auth\.signInWithPassword\(\{email,password\}\)/);
+  assert.match(app,/auth\.resetPasswordForEmail\(email/);
+  assert.match(app,/auth\.updateUser\(\{password\}\)/);
   assert.match(app,/Already have an account\?/);
   assert.match(app,/Guest demo/);
 });
