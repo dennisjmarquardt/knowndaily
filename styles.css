@@ -5,3 +5,9 @@
 .scripture-card .reading-ref{margin:4px 0 20px;font-size:clamp(28px,5vw,36px);font-weight:400}
 .scripture-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;font:17px/1.9 Georgia,'Times New Roman',serif;color:#273c37;text-align:left;max-height:none}
 .scripture-copyright{color:#68776e;font-size:11px;line-height:1.65;border-top:1px solid #dde5dc;padding-top:15px;margin:22px 0 5px}
+
+/* Clear account registration and returning-member login */
+.auth-heading{font-family:Georgia,serif;font-weight:400;font-size:23px;color:#1a3837;margin:0 0 10px}
+.auth-switch{margin:16px 0 12px;color:#486158;font-size:14px}
+.auth-switch .inline-button{font-size:14px}
+.auth-panel .note{margin:12px 0 0}
