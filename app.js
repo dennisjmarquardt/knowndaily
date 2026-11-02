@@ -236,7 +236,7 @@
     return `<main class="view-stack">${title('Make it yours.')}<p class="subtle">Choose what matters. Adjust your practices as your season of life changes.</p>
     <section class="panel" style="margin-top:24px"><div class="flex-between"><h2 class="section-title">Your daily habits</h2><span class="badge-small">${state.habits.length} active</span></div><p class="subtle">Tap Edit to change a target, or add something new.</p>${state.habits.map(h=>`<div class="settings-habit"><span><strong>${escapeHTML(h.title)}</strong><br/><small>${goalText(h)}</small></span><div><button data-action="edit-habit" data-id="${h.id}">Edit</button> <button data-action="delete-habit" data-id="${h.id}" aria-label="Delete ${escapeHTML(h.title)}">✕</button></div></div>`).join('')}<button class="secondary" data-action="new-habit" style="margin-top:10px">+ Add a habit</button></section>
     <section class="panel" style="margin-top:17px"><h2 class="section-title">Bible reading plan</h2><p class="subtle">The default follows the 66-book Protestant Bible in order. Select your starting chapter to jump to another book.</p><div class="form-grid"><label class="form-label">Book<select class="field" id="book-select">${BOOKS.map(([b],i)=>`<option value="${i}" ${bookForIndex(state.readingIndex)===i?'selected':''}>${escapeHTML(b)}</option>`).join('')}</select></label><label class="form-label">Chapter<select class="field" id="chapter-select">${chapterOptions(bookForIndex(state.readingIndex),state.readingIndex)}</select></label></div><button class="secondary" data-action="set-reading-start">Set next chapter</button><p class="hint">Changing the starting point does not erase past reading records.</p></section>
-    <section class="panel" style="margin-top:17px" id="account-panel"><h2 class="section-title">Account & syncing</h2>${auth?`<div class="auth-panel"><div class="eyebrow">✓ Secure cloud mode</div><p class="subtle">Signed in as <strong>${escapeHTML(email)}</strong>. Your data syncs through your Supabase project.</p><button class="secondary" data-action="refresh">Refresh from cloud</button> <button class="danger" data-action="sign-out">Sign out</button></div>`:configured?`<div class="auth-panel"><div class="eyebrow">Your KNOWN Daily account</div><h3 class="auth-heading">${authMode==='signup'?'Create your account':'Welcome back'}</h3><p class="subtle">${authMode==='signup'?'Save your habits, writing, and reading progress securely, and pick up where you left off on any device.':'Sign in to access your saved habits, writing, and reading progress across devices.'}</p><form id="login-form" class="login-email"><label class="form-label">Email address<input class="field" id="login-email" type="email" autocomplete="email" required placeholder="you@example.com"/></label><button class="primary" type="submit">${authMode==='signup'?'Create account':'Email me a sign-in link'}</button></form><div class="auth-switch">${authMode==='signup'?'Already have an account?':'New to KNOWN Daily?'} <button type="button" class="inline-button" data-action="auth-switch">${authMode==='signup'?'Sign in':'Create an account'}</button></div><p class="note">${authMode==='signup'?'We’ll email you a secure link to confirm your address and sign in.':'No password needed. We’ll email you a secure sign-in link.'} Or continue exploring the limited guest demo on this device. Demo data will not sync or transfer automatically.</p></div>`:`<div class="auth-panel"><div class="eyebrow">Local demo mode</div><p class="subtle">This installation is not yet linked to Supabase. Your habits and writing stay in this browser, and photos use this device's browser storage.</p><p class="note">To enable private cross-device sync, complete the instructions in README.md and fill in config.js before deploying.</p></div>`}<div class="flex-between"><div><strong style="font-size:13px">Export your records</strong><p class="note" style="margin:5px 0">Downloads habits, progress, reading and writing as JSON. Photos are not included.</p></div><button class="secondary" data-action="export">Export JSON</button></div></section>
+    <section class="panel" style="margin-top:17px" id="account-panel"><h2 class="section-title">Account & syncing</h2>${authMode==='set-password'&&auth?`<div class="auth-panel"><h3 class="auth-heading">Choose a password</h3><p class="subtle">Your secure password-reset link is verified. Enter a new password to use on all your devices.</p><form id="password-update-form"><label class="form-label">New password<input class="field" id="new-password" type="password" autocomplete="new-password" minlength="8" required/></label><label class="form-label">Confirm password<input class="field" id="new-password-confirm" type="password" autocomplete="new-password" minlength="8" required/></label><button class="primary" type="submit">Save new password</button></form></div>`:auth?`<div class="auth-panel"><div class="eyebrow">✓ Secure cloud mode</div><p class="subtle">Signed in as <strong>${escapeHTML(email)}</strong>. Your data syncs through your Supabase project.</p><button class="secondary" data-action="refresh">Refresh from cloud</button> <button class="danger" data-action="sign-out">Sign out</button></div>`:configured?`<div class="auth-panel"><div class="eyebrow">Your KNOWN Daily account</div><h3 class="auth-heading">${authMode==='signup'?'Create your account':authMode==='reset'?'Reset your password':'Welcome back'}</h3><p class="subtle">${authMode==='signup'?'Create an account to securely save your habits, writing, and reading progress on all your devices.':authMode==='reset'?'We’ll send you a secure reset link to set a new password. This also works if your previous account used an email sign-in link.':'Sign in with the email and password associated with your KNOWN Daily account.'}</p><form id="login-form"><label class="form-label">Email address<input class="field" id="login-email" type="email" autocomplete="email" required placeholder="you@example.com"/></label>${authMode==='reset'?'':`<label class="form-label">Password<input class="field" id="login-password" type="password" autocomplete="${authMode==='signup'?'new-password':'current-password'}" minlength="8" required/></label>`}${authMode==='signup'?`<label class="form-label">Confirm password<input class="field" id="login-password-confirm" type="password" autocomplete="new-password" minlength="8" required/></label>`:''}<button class="primary" type="submit">${authMode==='signup'?'Create account':authMode==='reset'?'Send reset link':'Sign in'}</button></form><div class="auth-switch">${authMode==='signup'?'Already have an account?':authMode==='reset'?'Remember your password?':'New to KNOWN Daily?'} <button type="button" class="inline-button" data-action="auth-switch">${authMode==='signup'?'Sign in':authMode==='reset'?'Sign in':'Create account'}</button></div>${authMode==='signin'?`<div class="auth-switch"><button type="button" class="inline-button" data-action="forgot-password">Forgot your password? Set one here.</button></div>`:''}<p class="note">${authMode==='signup'?'You may need to confirm your email before signing in.':'You can still explore the limited guest demo on this device.'} Guest data does not automatically transfer to your account.</p></div>`:`<div class="auth-panel"><div class="eyebrow">Local demo mode</div><p class="subtle">This installation is not yet linked to Supabase. Your habits and writing stay in this browser, and photos use this device's browser storage.</p><p class="note">To enable private cross-device sync, complete the instructions in README.md and fill in config.js before deploying.</p></div>`}<div class="flex-between"><div><strong style="font-size:13px">Export your records</strong><p class="note" style="margin:5px 0">Downloads habits, progress, reading and writing as JSON. Photos are not included.</p></div><button class="secondary" data-action="export">Export JSON</button></div></section>
     <div style="margin-top:20px;text-align:center" class="note">KNOWN Formation Labs · Version 0.4 · Built for meaningful daily formation, not perfect streaks.</div></main>`;
   }
   function bookForIndex(idx){let count=0;for(let i=0;i<BOOKS.length;i++){count+=BOOKS[i][1];if(idx%CHAPTERS.length <count)return i;}return 0;}
@@ -284,7 +284,8 @@
     else if(action==='cancel-habit'){document.querySelector('#habit-form-wrap')?.remove();editHabit=null;}
     else if(action==='delete-habit'){if(!h||!confirm(`Delete “${h.title}”? This also removes its completion checkmarks.`))return;try{if(cloud())await removeHabit(id);state.habits=state.habits.filter(x=>x.id!==id);state.completions=state.completions.filter(x=>x.habit_id!==id);if(!cloud())localSave();render();toast('Habit removed');}catch(err){noteError(err);}}
     else if(action==='set-reading-start'){const b=+document.querySelector('#book-select')?.value,chapter=+document.querySelector('#chapter-select')?.value;if(!BOOKS[b]||chapter<1||chapter>BOOKS[b][1])return;const previousIndex=state.readingIndex;state.readingIndex=BOOKS.slice(0,b).reduce((n,x)=>n+x[1],0)+chapter-1;if(await saveProfile()){toast('Reading plan updated');}else{state.readingIndex=previousIndex;}render();}
-    else if(action==='auth-switch'){authMode=authMode==='signup'?'signin':'signup';render();document.querySelector('#login-email')?.focus();}
+    else if(action==='auth-switch'){authMode=authMode==='signup'?'signin':authMode==='reset'?'signin':'signup';render();document.querySelector('#login-email')?.focus();}
+    else if(action==='forgot-password'){authMode='reset';render();document.querySelector('#login-email')?.focus();}
     else if(action==='sign-out'){try{await client.auth.signOut();user=null;versions=[];versionsStatus='idle';bibleContent=null;bibleRequested='';state=localLoad();view='today';render();toast('Signed out. Using local demo.');}catch(err){noteError(err);}}
     else if(action==='refresh'){try{await flushWriting();await loadCloud();toast('Cloud refresh finished');}catch(err){noteError(err);}}
   }
@@ -294,15 +295,65 @@
   root.addEventListener('click',e=>{handleClick(e).catch(noteError);});
   root.addEventListener('input',handleInput);
   root.addEventListener('change',e=>{if(e.target.id==='photo-input')photoUpload(e.target.files[0]);else if(e.target.id==='bible-version'){state.settings.bibleVersionId=e.target.value;bibleRequested='';bibleContent=null;saveProfile();render();}});
-  root.addEventListener('submit', async e=>{e.preventDefault();if(e.target.id==='habit-form'){await addOrEditHabit(e.target);}else if(e.target.id==='login-form'){const email=document.querySelector('#login-email').value.trim();if(!client)return;try{const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:authMode==='signup'}});if(error)throw error;toast(authMode==='signup'?'Check your email to finish creating your account.':'Check your email for your sign-in link.');}catch(err){noteError(err);}}});
+  root.addEventListener('submit',async e=>{
+    e.preventDefault();
+    if(e.target.id==='habit-form'){await addOrEditHabit(e.target);return;}
+    if(e.target.id==='password-update-form'){
+      const password=document.querySelector('#new-password')?.value||'',confirmation=document.querySelector('#new-password-confirm')?.value||'';
+      if(password.length<8||password!==confirmation){toast('Passwords must match and contain at least eight characters.',true);return;}
+      try{
+        const {error}=await client.auth.updateUser({password});if(error)throw error;
+        authMode='signin';toast('Password updated successfully. Your account is ready.');render();
+      }catch(err){noteError(err);}return;
+    }
+    if(e.target.id!=='login-form'||!client)return;
+    const email=document.querySelector('#login-email')?.value.trim()||'';
+    const password=document.querySelector('#login-password')?.value||'';
+    const button=e.target.querySelector('[type="submit"]');
+    if(button?.disabled)return;
+    if(authMode==='signup' && (password.length<8||password!==document.querySelector('#login-password-confirm')?.value)){
+      toast('Passwords must match and contain at least eight characters.',true);return;
+    }
+    if(authMode==='signin' && !password){toast('Enter your password.',true);return;}
+    if(button)button.disabled=true;
+    try{
+      let result;
+      if(authMode==='reset'){
+        result=await client.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
+        if(result.error)throw result.error;
+        toast('If this email is registered, a password reset link will arrive shortly.');
+      }else if(authMode==='signup'){
+        result=await client.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
+        if(result.error)throw result.error;
+        toast(result.data?.session?'Account created and signed in.':'Check your email to confirm your new account.');
+      }else{
+        result=await client.auth.signInWithPassword({email,password});
+        if(result.error)throw result.error;
+        toast('Signed in successfully.');
+      }
+    }catch(err){noteError(err);}
+    finally{if(button)button.disabled=false;}
+  });
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushWriting().catch(console.error);else if(cloud()&&view==='today')loadCloud().catch(console.error);});
   async function start(){state=localLoad();render();if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    const recoveryLink=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('type')==='recovery';
     if(C.url&&C.publishableKey&&!window.supabase){toast('Supabase library did not load. Using local demo.',true);return;}
     if(!configured)return;
     try{client=window.supabase.createClient(C.url,C.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
       const result=await client.auth.getSession();if(result.error)throw result.error;
-      if(result.data.session?.user){user=result.data.session.user;await loadCloud();}
-      client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session?.user&&user?.id!==session.user.id){user=session.user;setTimeout(()=>loadCloud().then(()=>toast('Cloud sync is active')).catch(noteError),0);}if(event==='SIGNED_OUT'&&user){user=null;state=localLoad();render();}});
+      if(result.data.session?.user){user=result.data.session.user;await loadCloud();if(recoveryLink){authMode='set-password';view='settings';render();}}
+      client.auth.onAuthStateChange((event,session)=>{
+        if(event==='PASSWORD_RECOVERY'){
+          if(session?.user)user=session.user;
+          authMode='set-password';view='settings';render();
+          if(session?.user)setTimeout(()=>loadCloud().then(()=>{view='settings';render();}).catch(noteError),0);
+          return;
+        }
+        if(event==='SIGNED_IN'&&session?.user&&user?.id!==session.user.id){
+          user=session.user;setTimeout(()=>loadCloud().then(()=>toast('Cloud sync is active')).catch(noteError),0);
+        }
+        if(event==='SIGNED_OUT'&&user){user=null;authMode='signin';state=localLoad();render();}
+      });
       render();
     }catch(err){noteError(err);user=null;state=localLoad();render();}
   }
