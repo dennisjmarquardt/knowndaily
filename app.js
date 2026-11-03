@@ -156,6 +156,18 @@
     if(view==='reading')queueMicrotask(()=>{if(versionsStatus==='idle')loadVersions();else if(versionsStatus==='ready'&&bibleRequested!==requestKey()&&versions.length)loadChapter();});
     if(view==='writing'){const editor=document.querySelector('#writing-editor');if(editor)editor.value=state.writing[activeDay]||'';}
   }
+  function renderDailyQuote(){
+    const library=window.KNOWN_DAILY_QUOTES;
+    const quote=library?.dailyQuote?.(new Date());
+    if(!quote)return '';
+    return `<div class="card quote" data-daily-quote="${todayString()}">
+      <small>Today's reflection</small>
+      <p>“${escapeHTML(quote.text)}”</p>
+      <div class="quote-attribution">— ${escapeHTML(quote.author)}</div>
+      <div class="quote-source">${escapeHTML(quote.source)}${quote.url?` · <a href="${escapeHTML(quote.url)}" target="_blank" rel="noopener noreferrer">Read source ↗</a>`:''}</div>
+      ${quote.nlt?`<div class="quote-credit">${escapeHTML(library.nltCredit)}</div>`:''}
+    </div>`;
+  }
   function renderToday(){
     const num=dayDone(), total=state.habits.length;
     return `<div class="today-layout"><aside class="left-rail">
@@ -164,7 +176,7 @@
       <p class="subtle">One intentional day at a time.</p>
       <div class="datebar"><button class="iconbutton" aria-label="Previous day" data-action="prev-day">‹</button><div class="date-name">${longDate(activeDay)}<div class="small-label">${activeDay===todayString()?'Today':'Your daily record'}</div></div><button class="iconbutton" aria-label="Next day" data-action="next-day" ${activeDay>=todayString()?'disabled':''}>›</button></div>
       <div class="card overview"><div class="eyebrow">Daily progress</div><div class="percentage">${pct()}%</div><div class="subtle">${num} of ${total} habits completed</div><div class="progress-track"><div class="progress-fill" style="width:${pct()}%"></div></div></div>
-      <div class="card quote"><small>A guiding idea</small><p>“Pay attention to the life you are forming.”</p><small>Known Formation Labs</small></div>
+      ${renderDailyQuote()}
     </aside><main><div class="section-header"><h2 class="section-title">Your daily practices</h2><button class="text-button" data-view="settings">+ Customize</button></div><div class="habit-list">
       ${state.habits.map(h=>{const done=isDone(h);let extra='';if(h.kind==='reading')extra=`${(state.readings[activeDay]||[]).length} / ${h.goal} chapters`;if(h.kind==='writing')extra=`${countWords(state.writing[activeDay]||'')} / ${h.goal} words`;
        return `<div class="card habit ${done?'completed':''}"><button class="habit-main" data-action="open-habit" data-id="${h.id}" aria-label="Open ${escapeHTML(h.title)}"><span class="habit-icon">${icons[h.kind]||'✓'}</span><span><span class="habit-title" style="display:block">${escapeHTML(h.title)}</span><span class="habit-detail">${extra||goalText(h)}</span></span><span class="habit-chevron">›</span></button><div class="check-wrap"><button class="check ${done?'done':''}" data-action="toggle-habit" data-id="${h.id}" aria-label="${done?'Completed':'Complete'} ${escapeHTML(h.title)}">✓</button></div></div>`;}).join('')}
@@ -357,5 +369,10 @@
       render();
     }catch(err){noteError(err);user=null;state=localLoad();render();}
   }
+  // Update the reflection on local date rollover without re-rendering an editor.
+  setInterval(()=>{
+    const card=root.querySelector('[data-daily-quote]');
+    if(card && card.dataset.dailyQuote!==todayString())card.outerHTML=renderDailyQuote();
+  },60000);
   start();
 })();
