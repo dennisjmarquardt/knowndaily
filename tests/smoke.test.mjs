@@ -51,7 +51,8 @@ test('daily quotes are provided with author and source metadata', async()=>{
     if(quote.nlt){assert.ok(quote.url.includes('biblegateway.com'));assert.ok(data.nltCredit.includes('Tyndale'));}
     else if(quote.url)assert.ok(quote.url.startsWith('https://'));
   }
-  const start=new Date(2026,10,2);
+  // Start at the boundary of a 32-day shuffle cycle.
+  const start=new Date(1970,0,1);
   const seen=new Set();
   for(let i=0;i<32;i++){
     const day=new Date(start.getFullYear(),start.getMonth(),start.getDate()+i);
