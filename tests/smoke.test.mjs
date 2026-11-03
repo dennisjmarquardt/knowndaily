@@ -38,3 +38,29 @@ test('Bible proxy authenticates before requesting publisher content',()=>{
   assert.match(proxy,/Sign in to KNOWN Daily first/);
   assert.doesNotMatch(proxy,/KtkAqYCg5VoXaz9MxWwR4/);
 });
+
+test('daily quotes are provided with author and source metadata', async()=>{
+  const {runInNewContext}=await import('node:vm');
+  const quotesCode=readFileSync(new URL('../quotes.js',import.meta.url),'utf8');
+  const context={window:{}};
+  runInNewContext(quotesCode,context);
+  const data=context.window.KNOWN_DAILY_QUOTES;
+  assert.equal(data.quotes.length,32);
+  for(const quote of data.quotes){
+    assert.ok(quote.text && quote.author && quote.source);
+    if(quote.nlt){assert.ok(quote.url.includes('biblegateway.com'));assert.ok(data.nltCredit.includes('Tyndale'));}
+    else if(quote.url)assert.ok(quote.url.startsWith('https://'));
+  }
+  const start=new Date(2026,10,2);
+  const seen=new Set();
+  for(let i=0;i<32;i++){
+    const day=new Date(start.getFullYear(),start.getMonth(),start.getDate()+i);
+    const quote=data.dailyQuote(day);
+    assert.equal(quote.text,data.dailyQuote(day).text,'same quote all day');
+    assert.ok(!seen.has(quote.text),'no repeats in a shuffle cycle');
+    seen.add(quote.text);
+  }
+  assert.match(app,/renderDailyQuote\(\)/);
+  assert.match(app,/data-daily-quote/);
+  assert.match(readFileSync(new URL('../index.html',import.meta.url),'utf8'),/src="\/quotes.js"/);
+});
