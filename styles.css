@@ -11,3 +11,12 @@
 .auth-switch{margin:16px 0 12px;color:#486158;font-size:14px}
 .auth-switch .inline-button{font-size:14px}
 .auth-panel .note{margin:12px 0 0}
+
+/* Daily quotation with attribution, source link, and NLT publisher credit. */
+.quote{min-width:0}
+.quote p{overflow-wrap:anywhere}
+.quote-attribution{font-size:13px;font-weight:750;color:#315a4c;margin-top:12px}
+.quote-source{font-size:12px;line-height:1.6;color:#6b7f73;margin-top:5px;overflow-wrap:anywhere}
+.quote-source a{color:#376e5c;text-decoration:underline;text-underline-offset:2px}
+.quote .quote-credit{font:10px/1.5 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#718077;margin-top:12px;border-top:1px solid #e5ece5;padding-top:10px}
+@media(max-width:550px){.quote{display:block;margin:15px 0 0}.quote p{font-size:19px;line-height:1.48}}
