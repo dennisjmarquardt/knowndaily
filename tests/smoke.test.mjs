@@ -74,3 +74,10 @@ test('iPhone photo importer accepts HEIC and converts supported inputs to WebP',
   assert.ok(app.includes("input.value=''"));
   assert.ok(app.includes('Most Compatible'));
 });
+
+test('new writing habits default to 250 words while saved goals remain customizable',()=>{
+  assert.ok(app.includes("title:'Write',kind:'writing',goal:250"));
+  assert.ok(app.includes("goal=h?.goal||250"));
+  assert.ok(app.includes("goal=wh?.goal||250"));
+  assert.ok(app.includes("goalText = h => h.kind==='writing'"));
+});

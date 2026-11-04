@@ -22,7 +22,7 @@
   const defaultHabits = () => [
     {id:uid(), title:'Wake up',kind:'time',goal:1,targetTime:'06:30',position:0},
     {id:uid(), title:'Read the Bible',kind:'reading',goal:3,targetTime:'',position:1},
-    {id:uid(), title:'Write',kind:'writing',goal:500,targetTime:'',position:2},
+    {id:uid(), title:'Write',kind:'writing',goal:250,targetTime:'',position:2},
     {id:uid(), title:'Be active',kind:'activity',goal:30,targetTime:'',position:3},
     {id:uid(), title:'Bedtime',kind:'bed',goal:1,targetTime:'22:30',position:4}
   ];
@@ -185,7 +185,7 @@
       <input id="photo-input" class="upload-input" type="file" accept="image/*,.heic,.heif" aria-label="Take or choose your daily photo"/>
       <p class="note" style="padding:7px 3px">${cloud()?'Your data is private and synced to your Supabase account.':'Demo mode: data stays in this browser. Connect Supabase in Customize to sync devices.'}</p></main></div>`;
   }
-  function renderWriting(){const h=state.habits.find(h=>h.kind==='writing'),goal=h?.goal||500, content=state.writing[activeDay]||'',count=countWords(content);
+  function renderWriting(){const h=state.habits.find(h=>h.kind==='writing'),goal=h?.goal||250, content=state.writing[activeDay]||'',count=countWords(content);
     return `<main class="view-stack"><button class="back" data-view="today">← Back to today</button>${title('A space to write.')}<p class="subtle">${longDate(activeDay)} · Words collected, one day at a time.</p><section class="panel activity-panel"><div class="flex-between"><div><div class="eyebrow">Daily writing</div><h2 class="section-title">${goal} words</h2></div><span class="badge-small" id="sync-message">Saved draft</span></div><div class="progress-track" style="background:#e2eae0;margin:18px 0 20px"><div id="writing-progress" class="progress-fill" style="width:${Math.min(100,100*count/goal)}%;background:#61947a"></div></div><textarea id="writing-editor" class="editor" placeholder="Start with a thought, a prayer, an observation, or a few words about today…"></textarea><div class="editor-toolbar"><div><strong id="word-count">${count}</strong> <span class="small-label">/ ${goal} words</span></div><button id="writing-complete" class="primary" data-action="finish-writing" ${count<goal?'disabled':''}>${h&&isDone(h)?'✓ Completed':'Complete writing'}</button></div><p class="hint">Drafts save automatically. Completing becomes available when you reach your word goal.</p></section></main>`;
   }
   const chosenBible = () => versions.find(v=>v.id===state.settings?.bibleVersionId) || versions.find(v=>/^(NLT|NIV)$/i.test(v.abbreviation)) || versions[0];
@@ -364,7 +364,7 @@
     else if(action==='refresh'){try{await flushWriting();await loadCloud();toast('Cloud refresh finished');}catch(err){noteError(err);}}
   }
   async function flushWriting(){if(view!=='writing')return;const textarea=document.querySelector('#writing-editor');const pending=!!draftTimer;if(draftTimer){clearTimeout(draftTimer);draftTimer=null;}if(textarea&&(pending||state.writing[activeDay]!==textarea.value))await syncWriting(activeDay,textarea.value);}
-  function handleInput(e){if(e.target.id==='writing-editor'){const content=e.target.value,number=countWords(content),wh=state.habits.find(h=>h.kind==='writing'),goal=wh?.goal||500;state.writing[activeDay]=content;if(cloud())cacheWriting(user.id,activeDay,content);document.querySelector('#word-count').textContent=number;document.querySelector('#writing-progress').style.width=`${Math.min(100,100*number/goal)}%`;const finish=document.querySelector('#writing-complete');finish.disabled=number<goal;setSyncMessage('Saving…');if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(()=>syncWriting(activeDay,content),850);
+  function handleInput(e){if(e.target.id==='writing-editor'){const content=e.target.value,number=countWords(content),wh=state.habits.find(h=>h.kind==='writing'),goal=wh?.goal||250;state.writing[activeDay]=content;if(cloud())cacheWriting(user.id,activeDay,content);document.querySelector('#word-count').textContent=number;document.querySelector('#writing-progress').style.width=`${Math.min(100,100*number/goal)}%`;const finish=document.querySelector('#writing-complete');finish.disabled=number<goal;setSyncMessage('Saving…');if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(()=>syncWriting(activeDay,content),850);
     } else if(e.target.id==='book-select'){selectBookOptions();}else if(e.target.id==='kind-select'){updateKindFields();}}
   root.addEventListener('click',e=>{handleClick(e).catch(noteError);});
   root.addEventListener('input',handleInput);
