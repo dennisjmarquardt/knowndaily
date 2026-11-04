@@ -311,7 +311,7 @@
       const blob=await compressImage(file);
       if(cloud()){
         const path=`${user.id}/${day}.webp`;
-        await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'});
+        await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'}));
         await required(client.from('daily_photos').upsert({user_id:user.id,day,path},{onConflict:'user_id,day'}));
         state.photos[day]=path;
       }else{
