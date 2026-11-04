@@ -182,7 +182,7 @@
        return `<div class="card habit ${done?'completed':''}"><button class="habit-main" data-action="open-habit" data-id="${h.id}" aria-label="Open ${escapeHTML(h.title)}"><span class="habit-icon">${icons[h.kind]||'✓'}</span><span><span class="habit-title" style="display:block">${escapeHTML(h.title)}</span><span class="habit-detail">${extra||goalText(h)}</span></span><span class="habit-chevron">›</span></button><div class="check-wrap"><button class="check ${done?'done':''}" data-action="toggle-habit" data-id="${h.id}" aria-label="${done?'Completed':'Complete'} ${escapeHTML(h.title)}">✓</button></div></div>`;}).join('')}
       ${state.habits.length===0?'<div class="empty">Make this your own. Add a daily practice in Customize.</div>':''}</div>
       <button class="photo-slot" data-action="open-photo"><span class="photo-preview" data-photo-day="${activeDay}">${state.photos[activeDay]?'📷':'＋'}</span><span class="photo-copy"><strong>${state.photos[activeDay]?'Your moment, captured':'A picture of today'}</strong><small>${state.photos[activeDay]?'Tap to replace today’s photo':'Add one photo to remember this day'}</small></span><span style="margin-left:auto;color:#68927c">↗</span></button>
-      <input id="photo-input" class="upload-input" type="file" accept="image/*" capture="environment" aria-label="Select your daily photo"/>
+      <input id="photo-input" class="upload-input" type="file" accept="image/*,.heic,.heif" aria-label="Take or choose your daily photo"/>
       <p class="note" style="padding:7px 3px">${cloud()?'Your data is private and synced to your Supabase account.':'Demo mode: data stays in this browser. Connect Supabase in Customize to sync devices.'}</p></main></div>`;
   }
   function renderWriting(){const h=state.habits.find(h=>h.kind==='writing'),goal=h?.goal||500, content=state.writing[activeDay]||'',count=countWords(content);
@@ -258,11 +258,73 @@
   function dbOpen(){return new Promise((resolve,reject)=>{const request=indexedDB.open('known-daily-photos',1);request.onupgradeneeded=()=>request.result.createObjectStore('photos');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
   async function localPhotoPut(day,blob){const db=await dbOpen();await new Promise((resolve,reject)=>{const tx=db.transaction('photos','readwrite');tx.objectStore('photos').put(blob,day);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();}
   async function localPhotoGet(day){const db=await dbOpen();const result=await new Promise((resolve,reject)=>{const tx=db.transaction('photos');const q=tx.objectStore('photos').get(day);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});db.close();return result;}
-  async function compressImage(file){const img=await createImageBitmap(file);const factor=Math.min(1,960/Math.max(img.width,img.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.width*factor));canvas.height=Math.max(1,Math.round(img.height*factor));const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);img.close?.();return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Could not compress this photo.')),'image/webp',0.75));}
-  async function photoUpload(file){if(!file||!file.type.startsWith('image/'))return toast('Choose a photo to upload.',true);const day=activeDay;try{toast('Saving your photo…');const blob=await compressImage(file);
-    if(cloud()){const path=`${user.id}/${day}.webp`;await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'}));await required(client.from('daily_photos').upsert({user_id:user.id,day,path},{onConflict:'user_id,day'}));state.photos[day]=path;}
-    else {await localPhotoPut(day,blob);state.photos[day]=`local:${day}`;localSave();}
-    toast('Today’s photo saved');render();}catch(e){noteError(e);}}
+  // iPhone camera photos may arrive as HEIC/HEIF, JPEG, or with a missing MIME type.
+  // Safari supports native HEIC decoding on recent iOS versions, but not every browser does.
+  const isPhotoFile=file=>!!file&&(file.type.startsWith('image/')||/\\.(heic|heif|jpe?g|png|webp|gif|avif)$/i.test(file.name||''));
+  const isHeicFile=file=>/image\\/(heic|heif)/i.test(file.type)||/\\.(heic|heif)$/i.test(file.name||'');
+  async function decodeImage(file){
+    if(typeof createImageBitmap==='function'){
+      try {const bitmap=await createImageBitmap(file);return {image:bitmap,release:()=>bitmap.close?.()};}
+      catch(error){console.warn('ImageBitmap decode failed, trying iPhone-compatible image fallback.',error);}
+    }
+    const url=URL.createObjectURL(file);
+    try{
+      const image=new Image();
+      image.src=url;
+      if(typeof image.decode==='function')await image.decode();
+      else await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Unable to decode photo'));});
+      return {image,release:()=>{}};
+    }finally{URL.revokeObjectURL(url);}
+  }
+  async function compressImage(file){
+    let source;
+    try{source=await decodeImage(file);}
+    catch{
+      const heic=isHeicFile(file);
+      throw new Error(heic?'This iPhone HEIC photo could not be opened in this browser. Try opening KNOWN Daily in an updated Safari, or on iPhone choose Settings → Camera → Formats → Most Compatible for future photos.':'This photo could not be opened. Please try a JPEG, PNG, or a new camera photo.');
+    }
+    try{
+      const {image}=source;
+      const width=image.width||image.naturalWidth,height=image.height||image.naturalHeight;
+      if(!width||!height)throw new Error('The photo has no readable dimensions.');
+      const factor=Math.min(1,960/Math.max(width,height));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(width*factor));
+      canvas.height=Math.max(1,Math.round(height*factor));
+      const ctx=canvas.getContext('2d');
+      if(!ctx)throw new Error('Your browser could not prepare the photo.');
+      ctx.drawImage(image,0,0,canvas.width,canvas.height);
+      const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The photo could not be compressed.')),'image/webp',0.75));
+      if(blob.type!=='image/webp')throw new Error('This browser cannot convert photos to WebP. Please update your browser.');
+      if(blob.size>3145728)throw new Error('The converted photo is too large (over 3 MB). Please try another image.');
+      return blob;
+    }finally{source.release();}
+  }
+  async function photoUpload(file){
+    if(!file)return;
+    if(!isPhotoFile(file))return toast('Choose a JPEG, HEIC, HEIF, PNG, or other supported image.',true);
+    const day=activeDay;
+    const input=document.querySelector('#photo-input');
+    if(input)input.disabled=true;
+    try{
+      toast('Converting and saving your photo…');
+      const blob=await compressImage(file);
+      if(cloud()){
+        const path=`${user.id}/${day}.webp`;
+        await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'});
+        await required(client.from('daily_photos').upsert({user_id:user.id,day,path},{onConflict:'user_id,day'}));
+        state.photos[day]=path;
+      }else{
+        await localPhotoPut(day,blob);state.photos[day]=`local:${day}`;localSave();
+      }
+      toast('Photo saved successfully');render();
+    }catch(e){
+      console.error('Photo import error',e);
+      toast(e?.message||'Photo could not be saved. Check your connection and try again.',true);
+    }finally{
+      if(input){input.value='';input.disabled=false;}
+    }
+  }
   async function loadPhotoPreviews(){const nodes=[...root.querySelectorAll('[data-photo-day]')];await Promise.all(nodes.map(async el=>{const day=el.dataset.photoDay,path=state.photos[day];if(!path)return;
     try{let url;if(cloud()){const result=await required(client.storage.from('daily-photos').createSignedUrl(path,3600));url=result.signedUrl;}else{const blob=await localPhotoGet(day);if(!blob)return;url=URL.createObjectURL(blob);photoUrls.push(url);}
       if(!el.isConnected)return;let im=document.createElement('img');im.alt=`Photo from ${day}`;im.loading='lazy';im.src=url;if(el.classList.contains('photo-cell'))el.prepend(im);else {el.textContent='';el.appendChild(im);}
