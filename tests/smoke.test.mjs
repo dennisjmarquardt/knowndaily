@@ -65,3 +65,12 @@ test('daily quotes are provided with author and source metadata', async()=>{
   assert.match(app,/data-daily-quote/);
   assert.match(readFileSync(new URL('../index.html',import.meta.url),'utf8'),/src="\/quotes.js"/);
 });
+
+test('iPhone photo importer recognizes HEIC, offers a native decode fallback and normalizes to WebP',()=>{
+  assert.match(app,/\\.\\(heic\\|heif/);
+  assert.match(app,/async function decodeImage\\(file\\)/);
+  assert.match(app,/new Image\\(\\)/);
+  assert.match(app,/image\\/webp/);
+  assert.match(app,/input\\.value=''/);
+  assert.match(app,/Most Compatible/);
+});
