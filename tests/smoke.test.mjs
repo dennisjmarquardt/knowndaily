@@ -65,3 +65,10 @@ test('daily quotes are provided with author and source metadata', async()=>{
   assert.match(app,/data-daily-quote/);
   assert.match(readFileSync(new URL('../index.html',import.meta.url),'utf8'),/src="\/quotes.js"/);
 });
+
+test('new writing habit defaults to 250 while existing custom goals are respected',()=>{
+  assert.match(app,/title:'Write',kind:'writing',goal:250/);
+  assert.match(app,/goal=h\?\.goal\|\|250/);
+  assert.match(app,/goal=wh\?\.goal\|\|250/);
+  assert.match(app,/goalText = h => h\.kind==='writing' \? \x60\$\{h\.goal\} words\x60/);
+});
