@@ -260,8 +260,8 @@
   async function localPhotoGet(day){const db=await dbOpen();const result=await new Promise((resolve,reject)=>{const tx=db.transaction('photos');const q=tx.objectStore('photos').get(day);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});db.close();return result;}
   // iPhone camera photos may arrive as HEIC/HEIF, JPEG, or with a missing MIME type.
   // Safari supports native HEIC decoding on recent iOS versions, but not every browser does.
-  const isPhotoFile=file=>!!file&&(file.type.startsWith('image/')||/\\.(heic|heif|jpe?g|png|webp|gif|avif)$/i.test(file.name||''));
-  const isHeicFile=file=>/image\\/(heic|heif)/i.test(file.type)||/\\.(heic|heif)$/i.test(file.name||'');
+  const isPhotoFile=file=>!!file&&(file.type.startsWith('image/')||/\.(heic|heif|jpe?g|png|webp|gif|avif)$/i.test(file.name||''));
+  const isHeicFile=file=>/image\/(heic|heif)/i.test(file.type)||/\.(heic|heif)$/i.test(file.name||'');
   async function decodeImage(file){
     if(typeof createImageBitmap==='function'){
       try {const bitmap=await createImageBitmap(file);return {image:bitmap,release:()=>bitmap.close?.()};}
