@@ -197,11 +197,11 @@
         if(!active.compressImage)throw new Error('The photo importer is unavailable.');
         status('Converting and uploading your photograph...');
         const blob=await active.compressImage(file);
-        const path=active.user.id+'/'+active.day+'.webp';
-        await must(active.client.storage.from('daily-note-photos').upload(path,blob,{upsert:true,contentType:'image/webp'}));
+        const path=active.user.id+'/'+active.day+'.'+(blob.type==='image/webp'?'webp':'jpg');
+        await must(active.client.storage.from('daily-note-photos').upload(path,blob,{upsert:true,contentType:blob.type}));
         const text=active.target.querySelector('#formation-notes-text')?.value||'';
-        await storeNote(text,path);
-        render();status('Photographed page saved privately.');
+        const saved=await storeNote(text,path);
+        if(saved){render();status('Photographed page saved privately.');}
         return;
       }
       if(target.dataset.notesOcr){
