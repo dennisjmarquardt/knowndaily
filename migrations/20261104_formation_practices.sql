@@ -93,10 +93,16 @@ grant select,insert,update,delete on public.daily_prayer_requests,
   public.daily_prayer_updates,public.daily_prayer_checkins,
   public.daily_prayer_sessions,public.daily_gratitude,public.daily_notes to authenticated;
 
+-- Permit Safari JPEG fallback without breaking existing WebP photographs.
+-- Existing daily-photos bucket remains PRIVATE and its per-user RLS policies stay in force.
+update storage.buckets
+set allowed_mime_types=array['image/webp','image/jpeg']
+where id='daily-photos';
+
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
-values('daily-note-photos','daily-note-photos',false,3145728,array['image/webp'])
+values('daily-note-photos','daily-note-photos',false,3145728,array['image/webp','image/jpeg'])
 on conflict(id) do update
-set public=false,file_size_limit=3145728,allowed_mime_types=array['image/webp'];
+set public=false,file_size_limit=3145728,allowed_mime_types=array['image/webp','image/jpeg'];
 
 drop policy if exists "daily_notes_photos_read" on storage.objects;
 create policy "daily_notes_photos_read" on storage.objects for select to authenticated
