@@ -31,6 +31,7 @@ test('all six new tables and photo bucket include private RLS policies',()=>{
   assert.match(sql,/daily_prayer_updates_owner_fk foreign key\(request_id,user_id\)/);
   assert.ok(sql.includes("values('daily-note-photos','daily-note-photos',false"));
   assert.ok(sql.includes('daily_notes_photos_read'));
+  assert.ok(sql.includes("allowed_mime_types=array['image/webp','image/jpeg']"));
 });
 
 test('formation app is bundled and photo converter is reused',()=>{
@@ -42,4 +43,11 @@ test('formation app is bundled and photo converter is reused',()=>{
   assert.ok(source.includes('data-notes-append'));
   assert.ok(source.includes('answered_at'));
   assert.ok(source.includes('data-prayer-check'));
+});
+
+test('iPhone image fallback keeps MIME type and filename consistent',()=>{
+  assert.ok(app.includes("blob=await encode('image/jpeg')"));
+  assert.ok(app.includes("blob.type==='image/webp'?'webp':'jpg'"));
+  assert.ok(app.includes("contentType:blob.type"));
+  assert.ok(source.includes("contentType:blob.type"));
 });
