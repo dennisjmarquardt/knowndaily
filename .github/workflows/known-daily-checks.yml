@@ -15,8 +15,9 @@ jobs:
       - name: Syntax
         run: |
           node --check app.js
+          node --check formation.js
           node --check config.js
           node --check api/bible.mjs
           node --check sw.js
       - name: Smoke and security contracts
-        run: node --test tests/smoke.test.mjs
+        run: node --test tests/*.test.mjs

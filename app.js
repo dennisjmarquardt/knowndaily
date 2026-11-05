@@ -147,11 +147,12 @@
   async function saveProfile(){try{if(cloud())await required(client.from('daily_profiles').update({reading_index:state.readingIndex,settings:state.settings,updated_at:new Date().toISOString()}).eq('user_id',user.id));else localSave();return true;}catch(e){noteError(e);return false;}}
   function setSyncMessage(m){const el=document.querySelector('#sync-message');if(el)el.textContent=m;}
   const title = (x) => `<div class="eyebrow">KNOWN FORMATION LABS</div><h1 class="headline">${x}</h1>`;
-  function header(){return `<div class="topbar"><div class="brand"><div class="mark">K</div><div><div class="brand-title">KNOWN <span style="font-weight:normal;color:#6b8b79">daily.</span></div><div class="brand-small">Formation Labs · Pay Attention</div></div></div><div class="top-actions"><button class="pill" data-view="settings" title="Open your account and settings"><span class="pill-dot ${cloud()?'cloud':''}"></span>${cloud()?'Synced':configured?'Sign in / Create account':'Guest demo'}</button><button class="iconbutton" aria-label="Settings" data-view="settings">⚙</button></div></div><nav class="tabs" aria-label="Main navigation"><button class="tab ${view==='today'?'current':''}" data-view="today">Today</button><button class="tab ${view==='history'?'current':''}" data-view="history">History</button><button class="tab ${view==='settings'?'current':''}" data-view="settings">Customize</button></nav>`;}
+  function header(){return `<div class="topbar"><div class="brand"><div class="mark">K</div><div><div class="brand-title">KNOWN <span style="font-weight:normal;color:#6b8b79">daily.</span></div><div class="brand-small">Formation Labs · Pay Attention</div></div></div><div class="top-actions"><button class="pill" data-view="settings" title="Open your account and settings"><span class="pill-dot ${cloud()?'cloud':''}"></span>${cloud()?'Synced':configured?'Sign in / Create account':'Guest demo'}</button><button class="iconbutton" aria-label="Settings" data-view="settings">⚙</button></div></div><nav class="tabs" aria-label="Main navigation"><button class="tab ${view==='today'?'current':''}" data-view="today">Today</button><button class="tab ${view==='history'?'current':''}" data-view="history">History</button><button class="tab ${view==='formation'?'current':''}" data-view="formation">Formation</button><button class="tab ${view==='settings'?'current':''}" data-view="settings">Customize</button></nav>`;}
   function render(){
     if(!state)return;
     photoUrls.forEach(u=>URL.revokeObjectURL(u));photoUrls=[];
-    root.innerHTML=`<div class="app-shell">${header()}${view==='today'?renderToday():view==='writing'?renderWriting():view==='reading'?renderReading():view==='activity'?renderActivity():view==='history'?renderHistory():renderSettings()}<footer class="footer">SMALL DAILY PRACTICES. A LIFE OF FORMATION. · KNOWN FORMATION LABS</footer></div>`;
+    root.innerHTML=`<div class="app-shell">${header()}${view==='today'?renderToday():view==='writing'?renderWriting():view==='reading'?renderReading():view==='activity'?renderActivity():view==='history'?renderHistory():view==='formation'?'<main class="view-stack" id="formation-root"></main>':renderSettings()}<footer class="footer">SMALL DAILY PRACTICES. A LIFE OF FORMATION. · KNOWN FORMATION LABS</footer></div>`;
+    if(view==='formation')window.KNOWN_FORMATION?.mount(root.querySelector('#formation-root'),{client,user,day:activeDay,compressImage});
     if(view==='today'||view==='history')loadPhotoPreviews();
     if(view==='reading')queueMicrotask(()=>{if(versionsStatus==='idle')loadVersions();else if(versionsStatus==='ready'&&bibleRequested!==requestKey()&&versions.length)loadChapter();});
     if(view==='writing'){const editor=document.querySelector('#writing-editor');if(editor)editor.value=state.writing[activeDay]||'';}
@@ -183,6 +184,7 @@
       ${state.habits.length===0?'<div class="empty">Make this your own. Add a daily practice in Customize.</div>':''}</div>
       <button class="photo-slot" data-action="open-photo"><span class="photo-preview" data-photo-day="${activeDay}">${state.photos[activeDay]?'📷':'＋'}</span><span class="photo-copy"><strong>${state.photos[activeDay]?'Your moment, captured':'A picture of today'}</strong><small>${state.photos[activeDay]?'Tap to replace today’s photo':'Add one photo to remember this day'}</small></span><span style="margin-left:auto;color:#68927c">↗</span></button>
       <input id="photo-input" class="upload-input" type="file" accept="image/*,.heic,.heif" aria-label="Take or choose your daily photo"/>
+      <section class="formation-home"><div class="section-header"><h2 class="section-title">Practices of formation</h2><button class="text-button" data-view="formation">Open practices ↗</button></div><button class="formation-home-button" data-view="formation">✧ Prayer requests & daily intercession · Weekly gratitude · Notes & photo transcription</button>${new Date().getDay()===0?'<p class="note">A new week begins today. Name ten things you are grateful for in Formation.</p>':''}</section>
       <p class="note" style="padding:7px 3px">${cloud()?'Your data is private and synced to your Supabase account.':'Demo mode: data stays in this browser. Connect Supabase in Customize to sync devices.'}</p></main></div>`;
   }
   function renderWriting(){const h=state.habits.find(h=>h.kind==='writing'),goal=h?.goal||250, content=state.writing[activeDay]||'',count=countWords(content);
@@ -294,8 +296,12 @@
       const ctx=canvas.getContext('2d');
       if(!ctx)throw new Error('Your browser could not prepare the photo.');
       ctx.drawImage(image,0,0,canvas.width,canvas.height);
-      const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The photo could not be compressed.')),'image/webp',0.75));
-      if(blob.type!=='image/webp')throw new Error('This browser cannot convert photos to WebP. Please update your browser.');
+      // Safari on some iPhones can decode HEIC/JPEG but cannot ENCODE WebP.
+      // Try WebP first, then universally supported JPEG. Never disguise JPEG bytes as WebP.
+      const encode=type=>new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The photo could not be compressed.')),type,0.76));
+      let blob=await encode('image/webp');
+      if(blob.type!=='image/webp')blob=await encode('image/jpeg');
+      if(blob.type!=='image/webp'&&blob.type!=='image/jpeg')throw new Error('This browser could not convert the photo to WebP or JPEG.');
       if(blob.size>3145728)throw new Error('The converted photo is too large (over 3 MB). Please try another image.');
       return blob;
     }finally{source.release();}
@@ -310,8 +316,13 @@
       toast('Converting and saving your photo…');
       const blob=await compressImage(file);
       if(cloud()){
-        const path=`${user.id}/${day}.webp`;
-        await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'}));
+        const path=`${user.id}/${day}.${blob.type==='image/webp'?'webp':'jpg'}`;
+        try{await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:blob.type,cacheControl:'300'}));}
+        catch(error){
+          if(blob.type==='image/jpeg'&&/mime|type|allowed/i.test(error?.message||''))
+            throw new Error('JPEG upload is not enabled in Supabase Storage. Apply the photo MIME-type migration to the daily-photos bucket.');
+          throw error;
+        }
         await required(client.from('daily_photos').upsert({user_id:user.id,day,path},{onConflict:'user_id,day'}));
         state.photos[day]=path;
       }else{
@@ -431,6 +442,7 @@
       render();
     }catch(err){noteError(err);user=null;state=localLoad();render();}
   }
+  window.KNOWN_DAILY_PHOTO={compressImage,isPhotoFile};
   // Update the reflection on local date rollover without re-rendering an editor.
   setInterval(()=>{
     const card=root.querySelector('[data-daily-quote]');
