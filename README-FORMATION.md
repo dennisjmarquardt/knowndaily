@@ -1,6 +1,6 @@
 # KNOWN Daily Formation practices — staged release
 
-This is a **development PR**, not safe to merge until the migration has been applied and tested in the correct KNOWN Daily Supabase project.
+The application interface can be deployed to Vercel for **production-site testing**, but authenticated Prayer, Gratitude and Notes records cannot work until the migration is applied to the correct Supabase project. The UI shows a setup-required error until then. Do not invite general users until the migration and RLS tests pass.
 
 ## Features in this branch
 
@@ -18,7 +18,7 @@ The home dashboard includes a Formation shortcut and a Formation tab. **These ar
 4. Verify all six RLS policies show on and the bucket is private.
 5. Use two different real email test accounts: verify Account A cannot fetch, update, or delete Account B's requests, updates, checkoffs, notes or photos. Test uploads, archive/answered flow and repeat logins on iPhone and Mac.
 6. Test weekly boundary across local midnight / DST, offline notes recovery, and OCR on both printed and handwritten pages. Record accuracy and show the OCR limitation before announcing the feature.
-7. Only after these tests pass should you merge the PR and check that Vercel shows a Ready production deployment.
+7. Once code is deployed, check Vercel shows a Ready production deployment. Test the actual authenticated flows only after steps 1–6 are complete.
 
 ### Limitations / safety
 
@@ -30,6 +30,10 @@ The home dashboard includes a Formation shortcut and a Formation tab. **These ar
 - No notification permission is requested; Sunday gratitude is an in-app prompt, not a push notification.
 - There is no conflict resolution for concurrent changes on two devices, and photo backups/export need further improvement.
 - The existing native iPhone HEIC decoder remains dependent on browser support; try Safari first.
+
+## iPhone camera fix — required Storage setting
+
+The iPhone photo import now tries WebP and falls back to JPEG when the browser cannot encode WebP. **The migration must allow both `image/webp` and `image/jpeg` on the existing private `daily-photos` bucket and the new `daily-note-photos` bucket.** The migration contains both changes. Without it, JPEG uploads will fail with an actionable configuration error. The MIME type and extension are stored correctly rather than labeling JPEG bytes as WebP.
 
 ## Acceptance tests
 
