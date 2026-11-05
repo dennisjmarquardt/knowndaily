@@ -296,8 +296,12 @@
       const ctx=canvas.getContext('2d');
       if(!ctx)throw new Error('Your browser could not prepare the photo.');
       ctx.drawImage(image,0,0,canvas.width,canvas.height);
-      const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The photo could not be compressed.')),'image/webp',0.75));
-      if(blob.type!=='image/webp')throw new Error('This browser cannot convert photos to WebP. Please update your browser.');
+      // Safari on some iPhones can decode HEIC/JPEG but cannot ENCODE WebP.
+      // Try WebP first, then universally supported JPEG. Never disguise JPEG bytes as WebP.
+      const encode=type=>new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The photo could not be compressed.')),type,0.76));
+      let blob=await encode('image/webp');
+      if(blob.type!=='image/webp')blob=await encode('image/jpeg');
+      if(blob.type!=='image/webp'&&blob.type!=='image/jpeg')throw new Error('This browser could not convert the photo to WebP or JPEG.');
       if(blob.size>3145728)throw new Error('The converted photo is too large (over 3 MB). Please try another image.');
       return blob;
     }finally{source.release();}
@@ -312,8 +316,13 @@
       toast('Converting and saving your photo…');
       const blob=await compressImage(file);
       if(cloud()){
-        const path=`${user.id}/${day}.webp`;
-        await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:'image/webp',cacheControl:'300'}));
+        const path=`${user.id}/${day}.${blob.type==='image/webp'?'webp':'jpg'}`;
+        try{await required(client.storage.from('daily-photos').upload(path,blob,{upsert:true,contentType:blob.type,cacheControl:'300'}));}
+        catch(error){
+          if(blob.type==='image/jpeg'&&/mime|type|allowed/i.test(error?.message||''))
+            throw new Error('JPEG upload is not enabled in Supabase Storage. Apply the photo MIME-type migration to the daily-photos bucket.');
+          throw error;
+        }
         await required(client.from('daily_photos').upsert({user_id:user.id,day,path},{onConflict:'user_id,day'}));
         state.photos[day]=path;
       }else{
