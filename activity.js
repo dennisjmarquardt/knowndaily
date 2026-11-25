@@ -7,7 +7,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const number = value => value === null || value === undefined ? '—' : new Intl.NumberFormat('en-US',{maximumFractionDigits:0}).format(Number(value));
   const minutes = value => value === null || value === undefined ? '—' : `${new Intl.NumberFormat('en-US',{maximumFractionDigits:0}).format(Number(value))} min`;
-  const hours = value => value === null || value === undefined ? '—' : `${(Number(value)/60).toFixed(1)} h`;
+  const hours = value => { if (value === null || value === undefined) return '—'; const total = Math.round(Number(value)); return `${Math.floor(total/60)}h ${String(total%60).padStart(2,'0')}m`; };
   const lastSync = value => value ? new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : 'Not synced yet';
   const duration = value => {
     const seconds = Number(value || 0), h = Math.floor(seconds/3600), m = Math.floor((seconds%3600)/60);
@@ -78,7 +78,7 @@
         </div>` : context.manualActivity ? `<div class="activity-dash-manual">${esc(context.manualActivity)} · ${number(manual)} min logged manually</div>` : '';
       target.innerHTML = `
         <section class="activity-dash-card">
-          <div class="activity-dash-heading"><div><div class="eyebrow">Movement & recovery</div><h2 class="section-title">Your activity</h2></div><button class="text-button" data-view="activity">Details ↗</button></div>
+          <div class="activity-dash-heading"><div><div class="eyebrow">Movement & recovery</div><h2 class="section-title">Your activity</h2></div><button class="text-button" data-view="settings">Manage ↗</button></div>
           <div class="activity-dash-main">
             <div class="activity-dash-active"><strong>${activeLabel}</strong><span>active min</span><small>${esc(source)} · target ${number(goal)} min</small></div>
             <div class="activity-dash-progress-wrap"><div class="activity-dash-progress"><span style="width:${progress}%"></span></div><small>${active===null?'Connect a source to track activity':goalMet?'Goal reached · mark your habit complete when ready':`${number(Math.max(0,goal-active))} min to your goal`}</small></div>
