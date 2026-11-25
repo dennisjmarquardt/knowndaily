@@ -123,7 +123,7 @@ async function ensureWebhook() {
   return false;
 }
 async function handleStravaStart(userId) {
-  if (!STRAVA_CLIENT_ID || !STRAVA_CLIENT_SECRET) throw Object.assign(new Error("Add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET in Supabase Edge Function Secrets before connecting Strava."), { status: 503 });
+  if (!STRAVA_CLIENT_ID || !STRAVA_CLIENT_SECRET || !STRAVA_VERIFY_TOKEN || STRAVA_TOKEN_ENCRYPTION_KEY.length < 32) throw Object.assign(new Error("Add STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_WEBHOOK_VERIFY_TOKEN, and a 32+ character STRAVA_TOKEN_ENCRYPTION_KEY in Supabase Edge Function Secrets before connecting Strava."), { status: 503 });
   const sql = requireDb();
   const state = randomToken();
   const stateHash = await sha256(state);
