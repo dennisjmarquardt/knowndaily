@@ -7,6 +7,7 @@ const APP_URL = (Deno.env.get("KNOWN_DAILY_APP_URL") || "https://known-daily.ver
 const STRAVA_CLIENT_ID = Deno.env.get("STRAVA_CLIENT_ID") || "";
 const STRAVA_CLIENT_SECRET = Deno.env.get("STRAVA_CLIENT_SECRET") || "";
 const STRAVA_VERIFY_TOKEN = Deno.env.get("STRAVA_WEBHOOK_VERIFY_TOKEN") || "";
+const STRAVA_TOKEN_ENCRYPTION_KEY = Deno.env.get("STRAVA_TOKEN_ENCRYPTION_KEY") || "";
 const PUBLISHABLE_KEYS = (() => {
   try { return JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}"); } catch { return {}; }
 })();
@@ -53,9 +54,8 @@ function fromBase64Url(value) {
 }
 async function encryptionKey() {
   if (!encryptionKeyPromise) {
-    // Derive a project-specific AES key from the server-only database URL.
-    // The URL is injected by Supabase and is never returned to the client.
-    const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(DB_URL + ":known-daily-activity-token-v1"));
+    if (STRAVA_TOKEN_ENCRYPTION_KEY.length < 32) throw Object.assign(new Error("Add a 32-character STRAVA_TOKEN_ENCRYPTION_KEY in Supabase Edge Function Secrets before connecting Strava."), { status: 503 });
+    const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(STRAVA_TOKEN_ENCRYPTION_KEY));
     encryptionKeyPromise = crypto.subtle.importKey("raw", material, "AES-GCM", false, ["encrypt", "decrypt"]);
   }
   return encryptionKeyPromise;
