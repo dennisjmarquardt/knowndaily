@@ -42,32 +42,65 @@
   }
   async function mountSummary(target, context) {
     if (!target) return;
+    const manual = Number(context.manualMinutes || 0);
     if (!context.client || !context.user) {
-      target.innerHTML = `<section class="activity-summary"><div class="activity-summary-head"><div><div class="eyebrow">Connected activity</div><h2 class="section-title">Movement, measured.</h2></div></div><p class="subtle">Sign in to connect Strava and Apple Health and see your daily activity here.</p></section>`;
+      target.innerHTML = `
+        <section class="activity-dash-card">
+          <div class="activity-dash-heading"><div><div class="eyebrow">Movement & recovery</div><h2 class="section-title">Your activity</h2></div><button class="text-button" data-view="settings">Connect ↗</button></div>
+          <div class="activity-dash-empty">Your activity minutes, workouts, steps, and sleep will appear here when you connect Apple Health or Strava.</div>
+        </section>`;
       return;
     }
-    target.innerHTML = `<section class="activity-summary"><p class="subtle">Loading connected activity…</p></section>`;
+    target.innerHTML = `<section class="activity-dash-card"><p class="subtle">Loading your activity…</p></section>`;
     try {
       const result = await call(context,'summary',{day:context.day});
       if (!target.isConnected) return;
       const apple = result.summaries?.find(row=>row.source==='apple_health') || {};
       const strava = result.summaries?.find(row=>row.source==='strava') || {};
-      const hasData = result.summaries?.length > 0;
       const workouts = result.workouts || [];
+      const appleMinutes = apple.exercise_minutes===null||apple.exercise_minutes===undefined ? null : Number(apple.exercise_minutes);
+      const stravaMinutes = strava.workout_minutes===null||strava.workout_minutes===undefined ? (workouts.length?workouts.reduce((sum,w)=>sum+Number(w.duration_seconds||0)/60,0):null) : Number(strava.workout_minutes);
+      // Prefer Apple Exercise Minutes for the daily total when available. Strava provides
+      // the workout detail, but adding both would double-count the same exercise.
+      const active = appleMinutes!==null ? appleMinutes : stravaMinutes!==null ? stravaMinutes : manual ? manual : null;
+      const source = appleMinutes!==null ? 'Apple Health' : stravaMinutes!==null ? 'Strava workout time' : manual ? 'Your manual log' : 'No activity data yet';
+      const goal = Number(context.activityGoal || 30);
+      const goalMet = active!==null && active>=goal;
+      const progress = active===null ? 0 : Math.min(100,Math.round(100*active/Math.max(goal,1)));
+      const sleep = apple.sleep_minutes===null||apple.sleep_minutes===undefined ? '—' : hours(apple.sleep_minutes);
+      const steps = apple.steps===null||apple.steps===undefined ? '—' : number(apple.steps);
+      const activeLabel = active===null ? '—' : number(active);
+      const workoutMarkup = workouts.length ? `
+        <div class="activity-dash-workouts">
+          <div class="activity-dash-workouts-title">Today's activity</div>
+          ${workouts.slice(0,3).map(w=>`<div class="activity-dash-workout"><span><strong>${esc(w.name)}</strong><small>${esc(w.sport_type)}</small></span><b>${esc(duration(w.duration_seconds))}</b></div>`).join('')}
+          ${workouts.length>3?`<p class="note">+${workouts.length-3} more workouts</p>`:''}
+        </div>` : context.manualActivity ? `<div class="activity-dash-manual">${esc(context.manualActivity)} · ${number(manual)} min logged manually</div>` : '';
       target.innerHTML = `
-        <section class="activity-summary">
-          <div class="activity-summary-head"><div><div class="eyebrow">Connected activity</div><h2 class="section-title">Movement, measured.</h2><p class="note">${esc(context.day)} · Apple Health + Strava</p></div><button class="text-button" data-view="settings">Manage connections ↗</button></div>
-          <div class="activity-grid">
-            ${stat('Exercise',apple.exercise_minutes===null?'—':number(apple.exercise_minutes),'minutes')}
-            ${stat('Steps',apple.steps===null?'—':number(apple.steps),'steps')}
-            ${stat('Workouts',strava.workout_count===null?'—':number(strava.workout_count),strava.workout_minutes===null?'Strava activities':`${number(strava.workout_minutes)} min total`)}
-            ${stat('Sleep',apple.sleep_minutes===null?'—':hours(apple.sleep_minutes),'hours')}
+        <section class="activity-dash-card">
+          <div class="activity-dash-heading"><div><div class="eyebrow">Movement & recovery</div><h2 class="section-title">Your activity</h2></div><button class="text-button" data-view="activity">Details ↗</button></div>
+          <div class="activity-dash-main">
+            <div class="activity-dash-active"><strong>${activeLabel}</strong><span>active min</span><small>${esc(source)} · target ${number(goal)} min</small></div>
+            <div class="activity-dash-progress-wrap"><div class="activity-dash-progress"><span style="width:${progress}%"></span></div><small>${active===null?'Connect a source to track activity':goalMet?'Goal reached · mark your habit complete when ready':`${number(Math.max(0,goal-active))} min to your goal`}</small></div>
           </div>
-          ${workouts.length ? `<div class="activity-workout-list"><div class="activity-list-title">Workouts logged</div>${workouts.slice(0,4).map(w=>`<div class="activity-workout-row"><span><strong>${esc(w.name)}</strong><small>${esc(w.sport_type)} · ${w.started_at?new Date(w.started_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'Time unavailable'}</small></span><span>${esc(duration(w.duration_seconds))}</span></div>`).join('')}${workouts.length>4?`<p class="note">Showing 4 of ${workouts.length} workouts.</p>`:''}</div>` : ''}
-          ${hasData?'': '<p class="note">No imported data for this day yet. Connect both sources in Customize, then run your Apple Health Shortcut or sync Strava.</p>'}
+          <div class="activity-dash-metrics">
+            <div><strong>${steps}</strong><small>steps</small></div>
+            <div><strong>${sleep}</strong><small>sleep</small></div>
+            <div><strong>${number(workouts.length || strava.workout_count || 0)}</strong><small>workouts</small></div>
+          </div>
+          ${workoutMarkup}
+          ${appleMinutes===null && apple.steps==null && apple.sleep_minutes==null ? '<p class="activity-dash-footnote">Connect Apple Health to add exercise, steps, and sleep. Strava adds workout details. Imported minutes never auto-check your habit.</p>' : '<p class="activity-dash-footnote">Apple Health supplies exercise minutes, steps, and sleep. Strava adds workout details. No double-counting.</p>'}
         </section>`;
+      const habitDetail = document.getElementById('activity-habit-detail');
+      const habitStatus = document.getElementById('activity-habit-status');
+      if (habitDetail) habitDetail.textContent = active===null ? `Goal ${goal} minutes` : `${number(active)} / ${number(goal)} minutes`;
+      if (habitStatus) habitStatus.textContent = goalMet && !context.activityDone ? 'Goal reached · tap ✓ to complete' : workouts.length ? `${workouts.length} workout${workouts.length===1?'':'s'} recorded` : '';
     } catch (error) {
-      if (target.isConnected) target.innerHTML = `<section class="activity-summary"><div class="activity-summary-head"><div><div class="eyebrow">Connected activity</div><h2 class="section-title">Movement, measured.</h2></div></div><p class="error">${esc(error.message)}</p><p class="note">Open Customize → Connected activity to check your connections.</p></section>`;
+      if (target.isConnected) target.innerHTML = `
+        <section class="activity-dash-card">
+          <div class="activity-dash-heading"><div><div class="eyebrow">Movement & recovery</div><h2 class="section-title">Your activity</h2></div><button class="text-button" data-view="settings">Settings ↗</button></div>
+          <p class="error">${esc(error.message)}</p><p class="activity-dash-footnote">Your habit checkmarks and manual activity log still work without a connection.</p>
+        </section>`;
     }
   }
   function connectionCard(provider, connected, syncAt) {
@@ -80,12 +113,12 @@
     return `
       <div class="activity-settings">
         <div class="eyebrow">Integrations</div><h2 class="section-title">Connected activity</h2>
-        <p class="subtle">Bring your movement into your daily record. Imported activity stays separate from habit checkmarks.</p>
+        <p class="subtle">Connect once. KNOWN Daily will show active minutes, workout details, steps, and sleep on your daily dashboard. Imported activity never auto-checks a habit.</p>
         ${connectionCard('strava',strava.status==='connected',strava.last_sync_at)}
         ${connectionCard('apple_health',apple.status==='connected',apple.last_sync_at)}
         ${pendingAppleToken?`<div class="activity-token"><strong>Your new Apple Health Shortcut key</strong><p class="note">Copy this now. KNOWN Daily stores only a one-way hash, so this key cannot be shown again after you leave this screen.</p><input id="activity-shortcut-token" class="field" type="text" readonly value="${esc(pendingAppleToken)}" /><button class="secondary" data-activity-action="copy-apple-token">Copy key</button></div>`:''}
         <div class="activity-instructions"><strong>How the two connections work</strong>
-          <ul><li><b>Strava</b> supplies your individual workouts, activity types, duration, distance, and elevation.</li><li><b>Apple Health</b> supplies daily exercise minutes, steps, and sleep through an iPhone Shortcut.</li></ul>
+          <ul><li><b>Strava</b> supplies your individual workouts, activity types, duration, distance, and elevation.</li><li><b>Apple Health</b> supplies daily exercise minutes, steps, and last-night sleep through an iPhone Shortcut.</li></ul>
           <p class="note">The Shortcut sends only the daily totals you choose. No GPS routes, heart-rate history, or full Health export is stored.</p>
           <a href="https://github.com/dennisjmarquardt/knowndaily/blob/main/README-ACTIVITY-INTEGRATION.md" target="_blank" rel="noopener noreferrer">Open the setup guide ↗</a>
         </div>
